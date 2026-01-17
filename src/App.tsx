@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { ChatInput } from './components/chat/ChatInput';
 import { BrandLogo } from './components/brand/BrandLogo';
@@ -108,7 +108,12 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
   const { theme } = useTheme();
   const { user, profile, loading: authLoading, needsOnboarding, updateLastPersona } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Check if we're loading a session from history BEFORE useChat initialization
+  // This prevents the init effect from overwriting loaded messages
+  const sessionToLoad = location.state?.sessionToLoad as ChatSession | undefined;
 
   // Group chat mode detection
   const isGroupMode = !!groupChatId;
@@ -124,9 +129,11 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
   const [replyTo, setReplyTo] = useState<{ id: number; content: string; sender_nickname?: string; isAI: boolean } | null>(null);
 
   // Get initial persona from profile (validated against AI_PERSONAS)
-  // Only set initialPersona once auth is done loading to avoid flash of default persona
+  // If loading from history, use the session's persona instead
   const savedPersona = profile?.last_persona as keyof typeof AI_PERSONAS | null;
-  const initialPersona = !authLoading && savedPersona && savedPersona in AI_PERSONAS ? savedPersona : undefined;
+  const initialPersona = sessionToLoad
+    ? sessionToLoad.persona
+    : (!authLoading && savedPersona && savedPersona in AI_PERSONAS ? savedPersona : undefined);
 
   const {
     messages,
@@ -162,7 +169,25 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
     pendingRemoteMusic,
     playPendingMusic,
     dismissPendingMusic
-  } = useChat(user?.id, profile || undefined, initialPersona, authLoading);
+  } = useChat(
+    user?.id,
+    profile || undefined,
+    initialPersona,
+    authLoading,
+    // Pass session to load directly so it's available immediately on mount
+    sessionToLoad ? {
+      messages: sessionToLoad.messages.filter(msg => msg.content && msg.content.trim() !== ''),
+      id: sessionToLoad.id,
+      heat_level: sessionToLoad.heat_level
+    } : null
+  );
+
+  // Clear navigation state after loading session to prevent reload on refresh
+  useEffect(() => {
+    if (sessionToLoad) {
+      window.history.replaceState({}, '', '/');
+    }
+  }, []); // Only run once on mount
 
   const { isRateLimited, getRemainingMessages, incrementCount, isAnonymous } = useAnonymousRateLimit();
 
@@ -805,10 +830,6 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
 function AppContent() {
   const { theme } = useTheme();
   const navigate = useNavigate();
-  const { user } = useAuth();
-
-  // Get loadChat function for history page
-  const { loadChat } = useChat(user?.id);
 
   return (
     <Routes>
@@ -820,8 +841,8 @@ function AppContent() {
       } />
       <Route path="/history" element={
         <ChatHistoryPage onLoadChat={(session) => {
-          loadChat(session);
-          navigate('/');
+          // Pass session via navigation state so MainChatPage can load it
+          navigate('/', { state: { sessionToLoad: session } });
         }} />
       } />
       <Route path="/settings" element={<SettingsPage />} />

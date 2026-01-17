@@ -82,20 +82,23 @@ export function useChat(
   userId?: string | null,
   userProfile?: { nickname?: string | null; about_me?: string | null },
   initialPersona?: keyof typeof AI_PERSONAS,
-  authLoading?: boolean
+  authLoading?: boolean,
+  initialSession?: { messages: Message[]; id: string; heat_level?: number } | null
 ) {
   // Start with empty state - will be initialized once we know the persona
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Unless we have an initialSession (loading from history)
+  const [messages, setMessages] = useState<Message[]>(initialSession?.messages || []);
   const [isChatMode, setChatMode] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
-  const [currentPersona, setCurrentPersona] = useState<keyof typeof AI_PERSONAS>('default');
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [currentProHeatLevel, setCurrentProHeatLevel] = useState<number>(2);
+  const [currentPersona, setCurrentPersona] = useState<keyof typeof AI_PERSONAS>(initialPersona || 'default');
+  // If initialSession provided, we're already initialized
+  const [isInitialized, setIsInitialized] = useState(!!initialSession);
+  const [currentProHeatLevel, setCurrentProHeatLevel] = useState<number>(initialSession?.heat_level || 2);
   const [currentEmotion, setCurrentEmotion] = useState<string>('joy');
   const [error, setError] = useState<string | null>(null);
   const [showAboutUs, setShowAboutUs] = useState(false);
   const [showRateLimitModal, setShowRateLimitModal] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [currentSessionId, setCurrentSessionId] = useState<string>(initialSession?.id || '');
   const [streamingMessageId, setStreamingMessageId] = useState<number | null>(null);
   const [useStreaming, setUseStreaming] = useState(true);
   const [youtubeMusic, setYoutubeMusic] = useState<YouTubeMusicData | null>(null);
@@ -292,14 +295,29 @@ export function useChat(
       }
     }
 
-    setMessages(prev => prev.map(msg =>
-      msg.id === messageId
-        ? { ...msg, content: processedContent, thinking, audioUrl, hasAnimated: false }
-        : msg
-    ));
+    // Update the message with final content
+    setMessages(prev => {
+      const updatedMessages = prev.map(msg =>
+        msg.id === messageId
+          ? { ...msg, content: processedContent, thinking, audioUrl, hasAnimated: false }
+          : msg
+      );
+
+      // Force immediate save after streaming completes to prevent data loss
+      // This is critical - debounced saves can be cancelled if user navigates away
+      if (currentSessionId && !isCollaborative) {
+        // Use setTimeout(0) to ensure this runs after state update is applied
+        setTimeout(() => {
+          saveChatSession(currentSessionId, updatedMessages, currentPersona, true);
+        }, 0);
+      }
+
+      return updatedMessages;
+    });
+
     setStreamingMessageId(null);
     setIsLoading(false);
-    isStreamingRef.current = false; // Mark streaming as complete - now it's safe to save
+    isStreamingRef.current = false; // Mark streaming as complete
 
     // If in collaborative mode, sync AI message to group_chat_messages table
     if (isCollaborative && collaborativeId && userId && userProfile?.nickname) {
@@ -315,7 +333,7 @@ export function useChat(
         thinking
       );
     }
-  }, [userId, isCollaborative, collaborativeId, userProfile]);
+  }, [userId, isCollaborative, collaborativeId, userProfile, currentSessionId, currentPersona, saveChatSession]);
 
   const extractEmotion = (content: string): string | null => {
     const match = content.match(/<emotion>([a-z]+)<\/emotion>/i);
@@ -387,6 +405,13 @@ export function useChat(
       setCurrentSessionId(generateUUID());
     }
   }, [currentSessionId]);
+
+  // Set theme when loaded from initial session (history)
+  useEffect(() => {
+    if (initialSession && initialPersona) {
+      setPersonaTheme(initialPersona);
+    }
+  }, []); // Only run once on mount
 
   // Initialize chat once auth loading is complete
   useEffect(() => {
