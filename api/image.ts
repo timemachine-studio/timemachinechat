@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Pollinations API key from environment variable
-const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || 'sk_pnLX1VHpRBz7xpZXfbvyxKLQRK4R7o5N';
+const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || 'sk_GOR3NDUo0aeq7ETRuYBgB2tFVsDYmsly';
 
 type Persona = 'default' | 'girlie' | 'pro' | 'chatgpt' | 'gemini' | 'claude' | 'grok';
 type Process = 'create' | 'edit';
@@ -49,10 +49,16 @@ function constructPollinationsUrl(params: ImageParams): URL {
   url.searchParams.set('key', POLLINATIONS_API_KEY);
 
   if (process === 'edit') {
-    // For edit process: use original image dimensions if provided
+    // For edit process: use original image dimensions if provided, otherwise use defaults based on orientation
     if (originalWidth && originalHeight) {
       url.searchParams.set('width', String(originalWidth));
       url.searchParams.set('height', String(originalHeight));
+    } else {
+      // Default dimensions for edit when not provided
+      const defaultWidth = orientation === 'landscape' ? 1920 : 1080;
+      const defaultHeight = orientation === 'landscape' ? 1080 : 1920;
+      url.searchParams.set('width', String(defaultWidth));
+      url.searchParams.set('height', String(defaultHeight));
     }
   } else {
     // For create process: include width/height based on orientation
@@ -63,8 +69,11 @@ function constructPollinationsUrl(params: ImageParams): URL {
   }
 
   // Handle multiple reference images (up to 4)
+  // IMPORTANT: The image parameter must be last in the URL and the value must be URL-encoded
+  // as per Pollinations API requirements
   if (inputImageUrls && inputImageUrls.length > 0) {
-    const imageUrls = inputImageUrls.slice(0, 4).map(encodeURIComponent).join(',');
+    const imageUrls = inputImageUrls.slice(0, 4).join(',');
+    // URL-encode the image URLs value and append as the last parameter
     url.searchParams.set('image', imageUrls);
   }
 
@@ -126,6 +135,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       height: parsedHeight
     });
 
+    // Log the URL for debugging (mask the API key)
+    const debugUrl = pollinationsUrl.toString().replace(/key=[^&]+/, 'key=***');
+    console.log('Pollinations request URL:', debugUrl);
+    console.log('Parsed image URLs:', parsedImageUrls);
+
     // Fetch the image from Pollinations server-side
     const imageResponse = await fetch(pollinationsUrl, {
       method: 'GET',
@@ -135,8 +149,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!imageResponse.ok) {
-      console.error('Pollinations API error:', imageResponse.status, await imageResponse.text().catch(() => ''));
-      return res.status(502).json({ error: 'Failed to generate image' });
+      const errorText = await imageResponse.text().catch(() => '');
+      console.error('Pollinations API error:', imageResponse.status, errorText);
+      console.error('Request URL was:', debugUrl);
+      return res.status(502).json({
+        error: 'Failed to generate image',
+        pollinationsStatus: imageResponse.status,
+        pollinationsError: errorText,
+        requestUrl: debugUrl
+      });
     }
 
     // Get the image as a buffer
