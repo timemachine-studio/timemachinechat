@@ -35,7 +35,7 @@ function constructPollinationsUrl(params: ImageParams): URL {
     model = persona === 'girlie' ? 'nanobanana' : 'nanobanana-pro';
   } else {
     // Create process: use seedream/zimage models
-    model = persona === 'girlie' ? 'zimage' : 'seedream-pro';
+    model = persona === 'girlie' ? 'zimage' : 'seedream';
   }
 
   // Use WHATWG URL API to avoid url.parse() deprecation warning
