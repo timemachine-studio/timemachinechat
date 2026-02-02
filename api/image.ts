@@ -39,7 +39,7 @@ function constructPollinationsUrl(params: ImageParams): URL {
   }
 
   // Use WHATWG URL API to avoid url.parse() deprecation warning
-  const url = new URL(`https://enter.pollinations.ai/api/generate/image/${encodeURIComponent(prompt)}`);
+  const url = new URL(`https://gen.pollinations.ai/api/generate/image/${encodeURIComponent(prompt)}`);
 
   // Add common parameters
   url.searchParams.set('enhance', 'false');
