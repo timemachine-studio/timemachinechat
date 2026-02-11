@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Pollinations API key from environment variable
-const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || 'sk_aczCydv8Z7KEnG6X0SjvbdrBZHHgp0R2';
+const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || '';
 
 type Persona = 'default' | 'girlie' | 'pro' | 'chatgpt' | 'gemini' | 'claude' | 'grok';
 type Process = 'create' | 'edit';
@@ -32,10 +32,10 @@ function constructPollinationsUrl(params: ImageParams): URL {
   let model: string;
   if (process === 'edit') {
     // Edit process: use nanobanana models
-    model = persona === 'girlie' ? 'nanobanana' : 'nanobanana-pro';
+    model = persona === 'girlie' ? 'klein-large' : 'klein-large';
   } else {
     // Create process: use seedream/zimage models
-    model = persona === 'girlie' ? 'zimage' : 'seedream';
+    model = persona === 'girlie' ? 'zimage' : 'zimage';
   }
 
   // Use WHATWG URL API to avoid url.parse() deprecation warning
@@ -62,8 +62,8 @@ function constructPollinationsUrl(params: ImageParams): URL {
     }
   } else {
     // For create process: include width/height based on orientation
-    const width = orientation === 'landscape' ? 3840 : 2160;
-    const height = orientation === 'landscape' ? 2160 : 3840;
+    const width = orientation === 'landscape' ? 2048 : 1152;
+    const height = orientation === 'landscape' ? 1152 : 2048;
     url.searchParams.set('width', String(width));
     url.searchParams.set('height', String(height));
   }
