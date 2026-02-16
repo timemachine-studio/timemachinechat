@@ -1,6 +1,7 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Plus, X, CornerDownRight } from 'lucide-react';
+import { Send, Plus, X, CornerDownRight, ImagePlus, Code, Music, HeartPulse } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { VoiceRecorder } from './VoiceRecorder';
 import { ChatInputProps, ImageDimensions } from '../../types/chat';
 import { LoadingSpinner } from '../loading/LoadingSpinner';
@@ -9,8 +10,12 @@ import { AI_PERSONAS } from '../../config/constants';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { MentionCall } from './MentionCall';
+import { PlusMenu, PlusMenuOption } from './PlusMenu';
 import { uploadImage } from '../../services/image/imageService';
 import { GroupChatParticipant } from '../../types/groupChat';
+import { useContour } from '../contour/useContour';
+import { ContourPanel } from '../contour/ContourPanel';
+import { ContourCommand, recordCommandUsage } from '../contour/modules/commands';
 
 type Persona = keyof typeof AI_PERSONAS;
 
@@ -88,10 +93,16 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
   const [isUploading, setIsUploading] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
   const [showMentionCall, setShowMentionCall] = useState(false);
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [selectedPlusOption, setSelectedPlusOption] = useState<PlusMenuOption | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { theme } = useTheme();
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const contour = useContour();
+  const contourRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -123,9 +134,50 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
     }
   }, [message]);
 
-  // Global keydown listener for type-to-chat functionality
+  // Close plus menu on outside click
+  useEffect(() => {
+    if (!showPlusMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
+        setShowPlusMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showPlusMenu]);
+
+  // Close contour on outside click
+  useEffect(() => {
+    if (!contour.isVisible) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        contourRef.current && !contourRef.current.contains(e.target as Node) &&
+        textareaRef.current && !textareaRef.current.contains(e.target as Node)
+      ) {
+        contour.dismiss();
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [contour.isVisible, contour]);
+
+  // Global keydown listener for Cmd+K shortcut and type-to-chat
   useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent) => {
+      // Cmd+K / Ctrl+K: Toggle Contour command palette
+      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+        event.preventDefault();
+        if (contour.isVisible) {
+          contour.dismiss();
+          setMessage('');
+        } else {
+          textareaRef.current?.focus();
+          setMessage('/');
+          contour.analyze('/');
+        }
+        return;
+      }
+
       // Check if any input element is currently focused
       const activeElement = document.activeElement;
       if (activeElement && (
@@ -142,8 +194,7 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
         event.key.length === 1 &&
         !event.ctrlKey &&
         !event.altKey &&
-        !event.metaKey &&
-        !event.shiftKey // Allow shift for capital letters
+        !event.metaKey
       ) {
         // Focus the textarea and let the browser handle the input
         textareaRef.current?.focus();
@@ -152,10 +203,21 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
+  }, [contour]);
+
+  const handlePlusMenuSelect = (option: PlusMenuOption) => {
+    setSelectedPlusOption(option);
+    setShowPlusMenu(false);
+
+    if (option === 'upload-photos') {
+      fileInputRef.current?.click();
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Don't send messages when contour is focused (textbox belongs to the tool)
+    if (contour.isFocused) return;
     if ((message.trim() || selectedImages.length > 0) && !isLoading && !isUploading) {
       // Close mention modal when sending message
       setShowMentionCall(false);
@@ -184,7 +246,8 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
           const publicUrls = successfulUploads.map(result => result.url);
           setUploadedImageUrls(publicUrls);
 
-          await onSendMessage(message, base64Images, undefined, publicUrls, firstImageDimensions);
+          const activeMode = selectedPlusOption && selectedPlusOption !== 'upload-photos' ? selectedPlusOption : undefined;
+          await onSendMessage(message, base64Images, undefined, publicUrls, firstImageDimensions, undefined, activeMode);
           setSelectedImages([]);
           setImagePreviewUrls([]);
           setUploadedImageUrls([]);
@@ -195,24 +258,162 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
           setIsUploading(false);
         }
       } else {
-        await onSendMessage(message);
+        const activeMode = selectedPlusOption && selectedPlusOption !== 'upload-photos' ? selectedPlusOption : undefined;
+        await onSendMessage(message, undefined, undefined, undefined, undefined, undefined, activeMode);
       }
       setMessage('');
+      contour.dismiss();
     }
   };
 
+  const handleCopyValue = useCallback((value: string) => {
+    navigator.clipboard.writeText(value).catch(() => {});
+  }, []);
+
+  const handleContourCommandSelect = useCallback((command: ContourCommand) => {
+    recordCommandUsage(command.id);
+    switch (command.action.type) {
+      case 'navigate':
+        navigate(command.action.path);
+        setMessage('');
+        contour.dismiss();
+        break;
+      case 'mode': {
+        const modeMap: Record<string, PlusMenuOption> = {
+          'web-coding': 'web-coding',
+          'music-compose': 'music-compose',
+          'tm-healthcare': 'tm-healthcare',
+        };
+        const plusOption = modeMap[command.action.mode];
+        if (plusOption) {
+          handlePlusMenuSelect(plusOption);
+        }
+        setMessage('');
+        contour.dismiss();
+        break;
+      }
+      case 'clipboard': {
+        let clipboardValue = '';
+        if (command.action.handler === 'uuid') {
+          clipboardValue = crypto.randomUUID?.() ||
+            'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+              const r = (Math.random() * 16) | 0;
+              return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+            });
+        } else if (command.action.handler === 'timestamp') {
+          clipboardValue = Math.floor(Date.now() / 1000).toString();
+        }
+        if (clipboardValue) {
+          navigator.clipboard.writeText(clipboardValue).catch(() => {});
+        }
+        setMessage('');
+        contour.dismiss();
+        break;
+      }
+      case 'inline':
+        // Open the tool INSIDE the contour panel (focused mode)
+        if (contour.focusOnModule(command.action.handler)) {
+          setMessage('');
+        } else {
+          setMessage('');
+          contour.dismiss();
+        }
+        break;
+    }
+  }, [navigate, contour, handlePlusMenuSelect]);
+
+  /**
+   * Get a copyable result value from the current module state
+   */
+  const getModuleCopyValue = (): string | null => {
+    const mod = contour.state.module;
+    if (!mod) return null;
+    if (mod.calculator && !mod.calculator.isPartial) return mod.calculator.result.toString();
+    if (mod.units && !mod.units.isPartial) return mod.units.toValue.toFixed(4).replace(/\.?0+$/, '');
+    if (mod.currency?.toValue != null && !mod.currency.isPartial && !mod.currency.isLoading) return mod.currency.toValue.toFixed(2);
+    if (mod.color) return mod.color.hex;
+    if (mod.timezone && !mod.timezone.isPartial) return mod.timezone.toTime;
+    if (mod.date && !mod.date.isPartial) return mod.date.display;
+    if (mod.random) return mod.random.value;
+    if (mod.translator?.translatedText && !mod.translator.isLoading) return mod.translator.translatedText;
+    if (mod.dictionary?.meanings?.length && !mod.dictionary.isLoading) {
+      const firstDef = mod.dictionary.meanings[0]?.definitions[0]?.definition;
+      return firstDef ? `${mod.dictionary.word}: ${firstDef}` : null;
+    }
+    if (mod.wordcount) return `${mod.wordcount.words} words, ${mod.wordcount.characters} characters`;
+    if (mod.lorem && !mod.lorem.isPartial) return mod.lorem.text;
+    if (mod.jsonFormat?.isValid && !mod.jsonFormat.isPartial) return mod.jsonFormat.formatted;
+    if (mod.base64 && !mod.base64.isPartial && !mod.base64.error) return mod.base64.mode === 'encode' ? mod.base64.encoded : mod.base64.decoded;
+    if (mod.urlEncode && !mod.urlEncode.isPartial && !mod.urlEncode.error) return mod.urlEncode.mode === 'encode' ? mod.urlEncode.encoded : mod.urlEncode.decoded;
+    if (mod.hash?.sha256 && !mod.hash.isLoading) return mod.hash.sha256;
+    if (mod.regex?.isValid && mod.regex.pattern) return `/${mod.regex.pattern}/${mod.regex.flags}`;
+    return null;
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Command palette navigation
+    if (contour.isVisible && contour.state.mode === 'commands') {
+      if (e.key === 'ArrowUp') { e.preventDefault(); contour.selectUp(); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); contour.selectDown(); return; }
+      if (e.key === 'Tab') { e.preventDefault(); contour.selectDown(); return; }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (contour.selectedCommand) handleContourCommandSelect(contour.selectedCommand);
+        return;
+      }
+    }
+
+    // Module mode: Enter copies result or starts timer
+    if (contour.isVisible && contour.state.mode === 'module' && contour.state.module) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const mod = contour.state.module;
+
+        // Timer: Enter starts the timer
+        if (mod.id === 'timer' && mod.timer && !mod.timer.isRunning && !mod.timer.isComplete) {
+          e.preventDefault();
+          contour.startTimer();
+          return;
+        }
+
+        // Other modules: Enter copies the result
+        const copyValue = getModuleCopyValue();
+        if (copyValue) {
+          e.preventDefault();
+          navigator.clipboard.writeText(copyValue).catch(() => {});
+          if (!contour.isFocused) {
+            setMessage('');
+            contour.dismiss();
+          }
+          return;
+        }
+
+        // In focused mode with no result yet, don't send message
+        if (contour.isFocused) {
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey && isDesktop) {
       e.preventDefault();
       handleSubmit(e);
-    } else if (e.key === 'Escape' && showMentionCall) {
-      setShowMentionCall(false);
+    } else if (e.key === 'Escape') {
+      if (contour.isVisible) {
+        contour.dismiss();
+        return;
+      }
+      if (showPlusMenu) setShowPlusMenu(false);
+      if (showMentionCall) setShowMentionCall(false);
     }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
     setMessage(newValue);
+
+    // Feed input to Contour for smart detection
+    contour.analyze(newValue);
 
     if (newValue.endsWith('@')) {
       setShowMentionCall(true);
@@ -234,6 +435,24 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
       textareaRef.current.focus();
       const newCursorPosition = cursorPosition + command.length;
       textareaRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
+    }
+  };
+
+  const plusOptionIcons: Record<PlusMenuOption, React.ComponentType<{ className?: string }>> = {
+    'upload-photos': ImagePlus,
+    'web-coding': Code,
+    'music-compose': Music,
+    'tm-healthcare': HeartPulse,
+  };
+
+  const handlePlusButtonClick = () => {
+    if (selectedPlusOption) {
+      // Already has a selected option — reset and show card
+      setSelectedPlusOption(null);
+      setShowPlusMenu(true);
+    } else {
+      // Toggle the card
+      setShowPlusMenu(prev => !prev);
     }
   };
 
@@ -357,23 +576,37 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
             multiple
           />
           
-          <motion.button
-            type="button"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading || isUploading || selectedImages.length >= 4}
-            className={`p-3 rounded-full ${theme.text} disabled:opacity-50 relative group transition-all duration-300`}
-            style={{
-              background: `linear-gradient(135deg, ${personaStyles.tintColors[currentPersona]}, rgba(255, 255, 255, 0.05))`,
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              border: `1px solid ${personaStyles.borderColors[currentPersona]}`,
-              boxShadow: `${personaStyles.glowShadow[currentPersona]}, inset 0 1px 0 rgba(255, 255, 255, 0.15)`
-            }}
-          >
-            <Plus className="w-5 h-5 relative z-10" />
-          </motion.button>
+          <div className="relative" ref={plusMenuRef}>
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handlePlusButtonClick}
+              disabled={isLoading || isUploading}
+              className={`p-3 rounded-full ${theme.text} disabled:opacity-50 relative group transition-all duration-300`}
+              style={{
+                background: `linear-gradient(135deg, ${personaStyles.tintColors[currentPersona]}, rgba(255, 255, 255, 0.05))`,
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                border: `1px solid ${personaStyles.borderColors[currentPersona]}`,
+                boxShadow: `${personaStyles.glowShadow[currentPersona]}, inset 0 1px 0 rgba(255, 255, 255, 0.15)`
+              }}
+            >
+              {selectedPlusOption ? (
+                (() => {
+                  const IconComponent = plusOptionIcons[selectedPlusOption];
+                  return <IconComponent className="w-5 h-5 relative z-10" />;
+                })()
+              ) : (
+                <Plus className="w-5 h-5 relative z-10" />
+              )}
+            </motion.button>
+
+            <PlusMenu
+              isVisible={showPlusMenu}
+              onSelect={handlePlusMenuSelect}
+            />
+          </div>
 
           <div className="relative flex-1">
             <div className="relative flex items-center">
@@ -445,6 +678,22 @@ export function ChatInput({ onSendMessage, isLoading, currentPersona = 'default'
               participants={participants}
               currentUserId={user?.id}
             />
+
+            {/* TimeMachine Contour - Smart Assist Overlay */}
+            <div ref={contourRef}>
+              <ContourPanel
+                state={contour.state}
+                isVisible={contour.isVisible}
+                onCommandSelect={handleContourCommandSelect}
+                selectedIndex={contour.state.selectedIndex}
+                persona={currentPersona}
+                onTimerStart={contour.startTimer}
+                onTimerToggle={contour.toggleTimer}
+                onTimerReset={contour.resetTimer}
+                onSetTimerDuration={contour.setTimerDuration}
+                onCopyValue={handleCopyValue}
+              />
+            </div>
           </div>
         </div>
       </div>

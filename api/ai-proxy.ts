@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { SPECIAL_MODE_CONFIGS } from './specialModePrompts.js';
 
 // Initialize Supabase client for server-side operations
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://etpehiyzlkhknzceizar.supabase.co';
@@ -1067,10 +1068,76 @@ async function incrementRateLimit(userId: string | null, ip: string, persona: st
   }
 }
 
+// Extract text content from images using Llama 4 Maverick (OCR pipeline)
+async function extractImageContent(imageUrls: string[]): Promise<string> {
+  const GROQ_API_KEY = process.env.GROQ_API_KEY;
+  if (!GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY not configured for image extraction');
+  }
+
+  const imageContents = imageUrls.map((url: string) => ({
+    type: 'image_url',
+    image_url: { url }
+  }));
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `You are an image content extraction system. Your job is to extract ALL content from this image and output it as plain text.
+
+Rules:
+- Extract EVERY piece of text visible in the image, character by character, word by word
+- Maintain the original structure and formatting as closely as possible
+- If there are mathematical equations, write them out in LaTeX notation
+- If there are tables, preserve the table structure using text formatting
+- If there are diagrams or figures, describe them in detail
+- If there are code snippets, preserve the exact code
+- Do NOT skip anything - every single piece of content must be captured
+- Do NOT add any commentary, analysis, or answers
+- Do NOT summarize - give the COMPLETE content
+- If the image contains a question paper or exam, extract every question exactly as written
+- For handwritten content, do your best to accurately read and transcribe it
+- If the image is not text-based (e.g. a photo, artwork, screenshot), describe everything visible in thorough detail
+
+Output ONLY the extracted content, nothing else.`
+          },
+          ...imageContents
+        ]
+      }],
+      temperature: 0.1,
+      max_tokens: 4000,
+      stream: false
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Image extraction error:', errorText);
+    throw new Error(`Image extraction failed: ${response.status}`);
+  }
+
+  const result = await response.json();
+  return result.choices?.[0]?.message?.content || 'Could not extract content from image.';
+}
+
 // Streaming function for Air persona - CEREBRAS API
 async function callCerebrasAirAPIStreaming(
   messages: any[],
-  tools?: any[]
+  tools?: any[],
+  model: string = 'gpt-oss-120b',
+  temperature: number = 0.9,
+  maxTokens: number = 2000,
+  reasoningEffort: string = 'low'
 ): Promise<ReadableStream> {
   const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
 
@@ -1079,16 +1146,16 @@ async function callCerebrasAirAPIStreaming(
   }
 
   const requestBody: any = {
-    model: "gpt-oss-120b",
+    model,
     messages,
-    temperature: 0.9,
-    max_completion_tokens: 2000,
+    temperature,
+    max_completion_tokens: maxTokens,
     top_p: 1,
     stream: true,
-    reasoning_effort: "low"
+    reasoning_effort: reasoningEffort
  };
 
-  if (tools) {
+  if (tools && tools.length > 0) {
     requestBody.tools = tools;
     requestBody.tool_choice = "auto";
     console.log('Cerebras API Tools:', JSON.stringify(tools, null, 2));
@@ -1450,7 +1517,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { messages, persona = 'default', imageData, audioData, heatLevel = 2, stream = false, inputImageUrls, imageDimensions, userId, userMemories } = req.body;
+    const { messages, persona = 'default', imageData, audioData, heatLevel = 2, stream = false, inputImageUrls, imageDimensions, userId, userMemories, specialMode } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Invalid messages format' });
@@ -1474,9 +1541,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invalid persona' });
     }
 
+    // Resolve special mode per-persona config (if active)
+    const toolMap: Record<string, any> = {
+      imageGeneration: imageGenerationTool,
+      webSearch: webSearchTool,
+      youtubeMusic: youtubeMusicTool
+    };
+
+    // Map persona key to the 3 base personas used in special mode configs
+    const basePersona = (['default', 'girlie', 'pro'].includes(persona) ? persona : 'default') as 'default' | 'girlie' | 'pro';
+    const specialModeConfig = specialMode && SPECIAL_MODE_CONFIGS[specialMode]
+      ? SPECIAL_MODE_CONFIGS[specialMode][basePersona]
+      : null;
+
     // Get the appropriate system prompt
     let systemPrompt: string;
-    if (persona === 'pro' && 'systemPromptsByHeatLevel' in personaConfig) {
+    if (specialModeConfig) {
+      systemPrompt = specialModeConfig.systemPrompt;
+    } else if (persona === 'pro' && 'systemPromptsByHeatLevel' in personaConfig) {
       // Validate heat level and default to 2 if invalid
       const validHeatLevel = (heatLevel >= 1 && heatLevel <= 5) ? heatLevel : 2;
       systemPrompt = personaConfig.systemPromptsByHeatLevel[validHeatLevel as keyof typeof personaConfig.systemPromptsByHeatLevel];
@@ -1509,11 +1591,17 @@ The memory tags will be processed and removed from the visible response, so writ
 
 .`;
 
-    // Initialize model, system prompt, and tools with defaults
-    let modelToUse = personaConfig.model;
+    // Initialize model, system prompt, and tools — apply special mode overrides
+    let modelToUse = specialModeConfig?.model || personaConfig.model;
     let systemPromptToUse = enhancedSystemPrompt;
-    // Tools (memory is now handled via XML tags, not as a tool)
-    let toolsToUse: any[] = [imageGenerationTool, webSearchTool, youtubeMusicTool];
+    let toolsToUse: any[] = specialModeConfig && 'tools' in specialModeConfig
+      ? specialModeConfig.tools.map((t: string) => toolMap[t]).filter(Boolean)
+      : [imageGenerationTool, webSearchTool, youtubeMusicTool];
+
+    // Apply temperature, maxTokens, and reasoningEffort overrides from special mode
+    const temperatureToUse = specialModeConfig?.temperature ?? personaConfig.temperature;
+    const maxTokensToUse = specialModeConfig?.maxTokens ?? personaConfig.maxTokens;
+    const reasoningEffortToUse: string = specialModeConfig?.reasoningEffort ?? 'low';
 
     // Handle audio transcription if audioData is provided
     let processedMessages = [...messages];
@@ -1584,34 +1672,13 @@ The memory tags will be processed and removed from the visible response, so writ
     }
 
     let apiMessages;
-    
-    if (imageData) {
-      const lastMessage = processedMessages[processedMessages.length - 1];
-      const imageUrls = Array.isArray(imageData) ? imageData : [imageData];
-      
-      const imageContents = imageUrls.map((url: string) => ({
-        type: 'image_url',
-        image_url: { url }
-      }));
+    // Track if we need to run the image OCR pipeline before the main AI call
+    const hasImageInput = !!imageData && !isAudioInput;
+    const imageUrlsForOCR = hasImageInput ? (Array.isArray(imageData) ? imageData : [imageData]) : [];
 
-      apiMessages = [
-        {
-          role: 'user',
-          content: [
-            { 
-              type: 'text', 
-              text: `${systemPromptToUse}\n\n${lastMessage.content || "What's in this image?"}`
-            },
-            ...imageContents
-          ]
-        }
-      ];
-      
-      // Override model for image processing
-      modelToUse = 'meta-llama/llama-4-maverick-17b-128e-instruct';
-      toolsToUse = [imageGenerationTool, webSearchTool]; // Ensure image tool and web search are available for image inputs
-    } else {
-      // External AIs don't need system prompts - they use their default behavior
+    {
+      // Build apiMessages the same way for all cases (text-only messages)
+      // If images are present, the OCR pipeline will inject extracted text before the API call
       const externalAIs = ['chatgpt', 'gemini', 'claude', 'deepseek', 'grok'];
       const isExternalAI = externalAIs.includes(persona);
 
@@ -1642,6 +1709,46 @@ The memory tags will be processed and removed from the visible response, so writ
 
       let streamingResponse: ReadableStream;
 
+      // Image OCR pipeline: extract text from images before calling persona AI
+      if (hasImageInput && imageUrlsForOCR.length > 0) {
+        // Send status marker so frontend shows "Analyzing photo..."
+        res.write('[IMAGE_ANALYZING]');
+
+        try {
+          const extractedText = await extractImageContent(imageUrlsForOCR);
+
+          // Inject extracted text into the last user message in apiMessages
+          const lastMsgIndex = apiMessages.length - 1;
+          const lastMsg = apiMessages[lastMsgIndex];
+          const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+
+          // Build enriched message combining extracted image content + user prompt
+          // Include image-edit context so persona models know images are attached and editable
+          const imageEditContext = `\n\n[IMPORTANT: The user has attached ${imageUrlsForOCR.length} image(s) to this message. If the user is asking to edit, modify, or transform the image — use the generate_image tool with process="edit" and write a detailed prompt describing the desired result. The image URLs and dimensions are automatically handled by the system.]`;
+
+          const enrichedContent = userPrompt
+            ? `[Content extracted from the attached image(s):\n${extractedText}\n]${imageEditContext}\n\nUser's message: ${userPrompt}`
+            : `[Content extracted from the attached image(s):\n${extractedText}\n]\n\nThe user shared this image. Respond based on the extracted content above.`;
+
+          apiMessages[lastMsgIndex] = { ...lastMsg, content: enrichedContent };
+        } catch (ocrError) {
+          console.error('Image OCR pipeline error:', ocrError);
+          // Fallback: let the persona model know there was an image but OCR failed
+          const lastMsgIndex = apiMessages.length - 1;
+          const lastMsg = apiMessages[lastMsgIndex];
+          const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+          apiMessages[lastMsgIndex] = {
+            ...lastMsg,
+            content: userPrompt
+              ? `[The user attached an image but text extraction failed. Please respond to their message as best you can. If the user wanted to edit the image, use the generate_image tool with process="edit" and describe what the user wants.]\n\nUser's message: ${userPrompt}`
+              : `[The user attached an image but text extraction failed. Let them know you couldn't process the image and ask them to try again.]`
+          };
+        }
+
+        // Send status marker so frontend switches to "Thinking..."
+        res.write('[IMAGE_ANALYZED]');
+      }
+
       // Choose API based on persona
       const externalAIs = ['chatgpt', 'gemini', 'claude', 'deepseek', 'grok'];
       if (externalAIs.includes(persona)) {
@@ -1650,19 +1757,23 @@ The memory tags will be processed and removed from the visible response, so writ
           apiMessages,
           personaConfig.model
         );
-      } else if (persona === 'default' && !imageData && !audioData) {
-        // Air persona uses Cerebras gpt-oss-120b
+      } else if (persona === 'default' && !audioData) {
+        // Air persona uses Cerebras gpt-oss-120b (images already converted to text by OCR pipeline above)
         streamingResponse = await callCerebrasAirAPIStreaming(
           apiMessages,
-          toolsToUse
+          toolsToUse,
+          modelToUse,
+          temperatureToUse,
+          maxTokensToUse,
+          reasoningEffortToUse
         );
       } else {
         // Girlie and Pro personas use standard Groq API
         streamingResponse = await callGroqStandardAPIStreaming(
           apiMessages,
           modelToUse,
-          personaConfig.temperature,
-          personaConfig.maxTokens,
+          temperatureToUse,
+          maxTokensToUse,
           toolsToUse
         );
       }
@@ -1872,6 +1983,35 @@ The memory tags will be processed and removed from the visible response, so writ
       // Non-streaming response (fallback)
       let apiResponse: any;
 
+      // Image OCR pipeline for non-streaming: extract text from images before calling persona AI
+      if (hasImageInput && imageUrlsForOCR.length > 0) {
+        try {
+          const extractedText = await extractImageContent(imageUrlsForOCR);
+          const lastMsgIndex = apiMessages.length - 1;
+          const lastMsg = apiMessages[lastMsgIndex];
+          const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+
+          // Include image-edit context so persona models know images are attached and editable
+          const imageEditContext = `\n\n[IMPORTANT: The user has attached ${imageUrlsForOCR.length} image(s) to this message. If the user is asking to edit, modify, or transform the image — use the generate_image tool with process="edit" and write a detailed prompt describing the desired result. The image URLs and dimensions are automatically handled by the system.]`;
+
+          const enrichedContent = userPrompt
+            ? `[Content extracted from the attached image(s):\n${extractedText}\n]${imageEditContext}\n\nUser's message: ${userPrompt}`
+            : `[Content extracted from the attached image(s):\n${extractedText}\n]\n\nThe user shared this image. Respond based on the extracted content above.`;
+          apiMessages[lastMsgIndex] = { ...lastMsg, content: enrichedContent };
+        } catch (ocrError) {
+          console.error('Image OCR pipeline error (non-streaming):', ocrError);
+          const lastMsgIndex = apiMessages.length - 1;
+          const lastMsg = apiMessages[lastMsgIndex];
+          const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+          apiMessages[lastMsgIndex] = {
+            ...lastMsg,
+            content: userPrompt
+              ? `[The user attached an image but text extraction failed. Please respond to their message as best you can. If the user wanted to edit the image, use the generate_image tool with process="edit" and describe what the user wants.]\n\nUser's message: ${userPrompt}`
+              : `[The user attached an image but text extraction failed. Let them know you couldn't process the image and ask them to try again.]`
+          };
+        }
+      }
+
       // Choose API based on persona
       const externalAIs = ['chatgpt', 'gemini', 'claude', 'deepseek', 'grok'];
       if (externalAIs.includes(persona)) {
@@ -1880,16 +2020,16 @@ The memory tags will be processed and removed from the visible response, so writ
           apiMessages,
           personaConfig.model
         );
-      } else if (persona === 'default' && !imageData && !audioData) {
-        // Air persona uses Cerebras gpt-oss-120b
+      } else if (persona === 'default' && !audioData) {
+        // Air persona uses Cerebras gpt-oss-120b (images already converted to text by OCR pipeline above)
         const requestBody: any = {
-          model: "gpt-oss-120b",
+          model: modelToUse,
           messages: apiMessages,
-          temperature: 0.9,
-          max_completion_tokens: 2000,
+          temperature: temperatureToUse,
+          max_completion_tokens: maxTokensToUse,
           top_p: 1,
           stream: false,
-          reasoning_effort: "low"
+          reasoning_effort: reasoningEffortToUse
         };
 
         if (toolsToUse && toolsToUse.length > 0) {
@@ -1931,8 +2071,8 @@ The memory tags will be processed and removed from the visible response, so writ
           body: JSON.stringify({
             messages: apiMessages,
             model: modelToUse,
-            temperature: personaConfig.temperature,
-            max_tokens: personaConfig.maxTokens,
+            temperature: temperatureToUse,
+            max_tokens: maxTokensToUse,
             tools: toolsToUse,
             tool_choice: "auto",
             stream: false

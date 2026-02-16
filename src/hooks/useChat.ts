@@ -102,6 +102,8 @@ export function useChat(
   const [streamingMessageId, setStreamingMessageId] = useState<number | null>(null);
   const [useStreaming, setUseStreaming] = useState(true);
   const [youtubeMusic, setYoutubeMusic] = useState<YouTubeMusicData | null>(null);
+  // Track loading phase for image pipeline UX: 'analyzing_photo' | 'thinking' | null
+  const [loadingPhase, setLoadingPhase] = useState<'analyzing_photo' | 'thinking' | null>(null);
   // Pending remote music - music received from group chat that needs user action to play
   const [pendingRemoteMusic, setPendingRemoteMusic] = useState<YouTubeMusicData | null>(null);
 
@@ -450,7 +452,8 @@ export function useChat(
     audioData?: string,
     inputImageUrls?: string[],
     imageDimensions?: ImageDimensions,
-    replyTo?: { id: number; content: string; sender_nickname?: string; isAI: boolean }
+    replyTo?: { id: number; content: string; sender_nickname?: string; isAI: boolean },
+    specialMode?: string
   ) => {
     let messagePersona = currentPersona;
     let messageContent = content;
@@ -505,6 +508,9 @@ export function useChat(
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
     setError(null);
+    // Set initial loading phase based on whether images are attached
+    const hasImages = !!(imageData || (inputImageUrls && inputImageUrls.length > 0));
+    setLoadingPhase(hasImages ? 'analyzing_photo' : 'thinking');
 
     // If in collaborative mode, sync user message to group_chat_messages table
     if (isCollaborative && collaborativeId && userId && userProfile?.nickname) {
@@ -539,7 +545,8 @@ export function useChat(
       id: aiMessageId,
       content: '',
       isAI: true,
-      hasAnimated: false
+      hasAnimated: false,
+      specialMode: specialMode
     };
 
     setMessages(prev => [...prev, aiMessage]);
@@ -589,6 +596,7 @@ export function useChat(
             setYoutubeMusic(response.youtubeMusic);
           }
 
+          setLoadingPhase(null);
           completeStreamingMessage(aiMessageId, cleanedContent, response.thinking, response.audioUrl);
         },
         // onError callback
@@ -606,10 +614,16 @@ export function useChat(
           setMessages(prev => prev.filter(msg => msg.id !== aiMessageId));
           setStreamingMessageId(null);
           setIsLoading(false);
+          setLoadingPhase(null);
           isStreamingRef.current = false; // Clear streaming flag on error
         },
         userId || undefined,
-        userMemoryContext
+        userMemoryContext,
+        specialMode,
+        // onStatusChange callback for image pipeline UX
+        (status) => {
+          setLoadingPhase(status);
+        }
       );
     } else {
       // Use non-streaming response (fallback) - send API messages (without @mention in content and without initial message)
@@ -624,7 +638,8 @@ export function useChat(
           inputImageUrls,
           imageDimensions,
           userId || undefined,
-          userMemoryContext
+          userMemoryContext,
+          specialMode
         );
 
         const emotion = extractEmotion(aiResponse.content);
@@ -634,6 +649,7 @@ export function useChat(
           setCurrentEmotion(emotion);
         }
 
+        setLoadingPhase(null);
         completeStreamingMessage(aiMessageId, cleanedContent, aiResponse.thinking, aiResponse.audioUrl);
       } catch (error) {
         console.error('Failed to generate response:', error);
@@ -649,6 +665,7 @@ export function useChat(
         setMessages(prev => prev.filter(msg => msg.id !== aiMessageId));
         setStreamingMessageId(null);
         setIsLoading(false);
+        setLoadingPhase(null);
         isStreamingRef.current = false; // Clear streaming flag on error
       }
     }
@@ -980,6 +997,7 @@ export function useChat(
     streamingMessageId,
     useStreaming,
     youtubeMusic,
+    loadingPhase,
     currentSessionId,
     // Collaborative mode
     isCollaborative,

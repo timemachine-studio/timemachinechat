@@ -11,6 +11,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { GeneratedImage } from './GeneratedImage';
 import { AnimatedShinyText } from '../ui/AnimatedShinyText';
 import { AudioPlayerBubble } from './AudioPlayerBubble';
+import { CodeBlock } from './CodeBlock';
 
 interface AIMessageProps extends MessageProps {
   isChatMode: boolean;
@@ -21,7 +22,15 @@ interface AIMessageProps extends MessageProps {
   isStreaming?: boolean;
   audioUrl?: string;
   isStreamingActive?: boolean;
+  loadingPhase?: 'analyzing_photo' | 'thinking' | null;
+  specialMode?: string;
 }
+
+const SPECIAL_MODE_SHIMMER_TEXT: Record<string, string> = {
+  'web-coding': 'Thinking outside the box',
+  'music-compose': 'Thinking about the melody',
+  'tm-healthcare': 'Talking with the medical researcher',
+};
 
 const getPersonaColor = (persona: keyof typeof AI_PERSONAS = 'default') => {
   switch (persona) {
@@ -76,6 +85,7 @@ const processMemoryContent = (content: string): { cleanContent: string; hasSaved
   let cleanContent = content
     .replace(/<memory>[\s\S]*?<\/memory>/gi, '') // Remove memory tags
     .replace(/\[MEMORY_SAVED\]/g, '') // Remove marker
+    .replace(/!\[Generated Image\]\([^)]*$/, '') // Hide incomplete image markdown during streaming
     .trim();
 
   return { cleanContent, hasSavedMemory };
@@ -92,7 +102,9 @@ function AIMessageComponent({
   previousMessage = null,
   isStreaming = false,
   audioUrl,
-  isStreamingActive = false
+  isStreamingActive = false,
+  loadingPhase,
+  specialMode
 }: AIMessageProps) {
   const [showReasoning, setShowReasoning] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -227,16 +239,34 @@ function AIMessageComponent({
         {children}
       </blockquote>
     ),
-    code: ({ children }: { children: React.ReactNode }) => (
-      <code className={`bg-white/10 rounded px-1.5 py-0.5 text-sm font-mono ${theme.text}`}>
-        {children}
-      </code>
-    ),
-    pre: ({ children }: { children: React.ReactNode }) => (
-      <pre className={`bg-white/10 rounded-lg p-4 mb-4 overflow-x-auto font-mono text-sm ${theme.text}`}>
-        {children}
-      </pre>
-    ),
+    code: ({ className, children }: { className?: string; children: React.ReactNode }) => {
+      // Inline code only — block code is handled by the pre component
+      if (className) return <code className={className}>{children}</code>;
+      return (
+        <code className={`bg-white/10 rounded px-1.5 py-0.5 text-sm font-mono ${theme.text}`}>
+          {children}
+        </code>
+      );
+    },
+    pre: ({ children }: { children: React.ReactNode }) => {
+      // Extract language and code from the child <code> element
+      const child = React.Children.toArray(children)[0] as React.ReactElement<{
+        className?: string;
+        children?: React.ReactNode;
+      }> | undefined;
+      if (child && child.props) {
+        const langMatch = /language-(\w+)/.exec(child.props.className || '');
+        const language = langMatch ? langMatch[1] : undefined;
+        const code = String(child.props.children || '').replace(/\n$/, '');
+        return <CodeBlock language={language} code={code} themeText={theme.text} />;
+      }
+      // Fallback for non-code children
+      return (
+        <pre className={`bg-white/10 rounded-lg p-4 mb-4 overflow-x-auto font-mono text-sm ${theme.text}`}>
+          {children}
+        </pre>
+      );
+    },
     img: ({ src, alt }: { src?: string; alt?: string }) => {
       // Check if this is a generated image:
       // 1. Alt text is "Generated Image" (preserved after URL replacement to Supabase)
@@ -356,7 +386,28 @@ function AIMessageComponent({
               gradientAnimationDuration={2}
               textClassName="text-base"
               className="py-1"
-              style={{ 
+              style={{
+                fontFamily: 'SF Pro Display, -apple-system, BlinkMacSystemFont, sans-serif',
+                fontSize: '16px'
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Special mode thinking state — replaces the normal "Thinking..." spinner */}
+      {isStreamingActive && !cleanContent && specialMode && SPECIAL_MODE_SHIMMER_TEXT[specialMode] && (
+        <div className="w-full max-w-2xl mx-auto my-4">
+          <div className="flex items-center justify-center py-4 px-4 rounded-2xl bg-black/5 backdrop-blur-sm">
+            <AnimatedShinyText
+              text={SPECIAL_MODE_SHIMMER_TEXT[specialMode]}
+              useShimmer={true}
+              baseColor={shimmerColors.baseColor}
+              shimmerColor={shimmerColors.shimmerColor}
+              gradientAnimationDuration={2}
+              textClassName="text-base"
+              className="py-1"
+              style={{
                 fontFamily: 'SF Pro Display, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: '16px'
               }}
@@ -377,7 +428,7 @@ function AIMessageComponent({
         </div>
       )}
       {/* Show content when not generating or when generation is complete */}
-      {!isGeneratingImage && !isRecordingVoice && (cleanContent || isStreamingActive) && !audioUrl && (
+      {!isGeneratingImage && !isRecordingVoice && !(isStreamingActive && !cleanContent && specialMode && SPECIAL_MODE_SHIMMER_TEXT[specialMode as string]) && (cleanContent || isStreamingActive) && !audioUrl && (
         <>
           {isChatMode ? (
             <div className="flex flex-col gap-1">
@@ -420,7 +471,7 @@ function AIMessageComponent({
                       transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                       className="w-4 h-4 border-2 border-current border-t-transparent rounded-full"
                     />
-                    Thinking...
+                    {loadingPhase === 'analyzing_photo' ? 'Analyzing photo...' : 'Thinking...'}
                   </div>
                 ) : null}
               </div>
@@ -458,7 +509,7 @@ function AIMessageComponent({
                     transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                     className="w-6 h-6 border-2 border-current border-t-transparent rounded-full"
                   />
-                  Thinking...
+                  {loadingPhase === 'analyzing_photo' ? 'Analyzing photo...' : 'Thinking...'}
                 </div>
               ) : null}
             </div>
