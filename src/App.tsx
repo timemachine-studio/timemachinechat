@@ -26,6 +26,9 @@ import { PersonasPage } from './components/personas/PersonasPage';
 import { FeaturesPage } from './components/features/FeaturesPage';
 import { GroupChatModal } from './components/groupchat/GroupChatModal';
 import { GroupSettingsPage } from './components/groupchat/GroupSettingsPage';
+import { HomePage } from './components/home/HomePage';
+import { NotesPage } from './components/notes/NotesPage';
+import { HealthcarePage } from './components/healthcare/HealthcarePage';
 import {
   getGroupChat,
   getGroupChatInvite,
@@ -88,7 +91,7 @@ function ChatByIdPage() {
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/home')}
             className="px-6 py-3 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-200"
           >
             Go Home
@@ -117,6 +120,14 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
   // Check if we're loading a session from history BEFORE useChat initialization
   // This prevents the init effect from overwriting loaded messages
   const sessionToLoad = location.state?.sessionToLoad as ChatSession | undefined;
+
+  // Check if navigating from healthcare page to auto-enable TM Healthcare mode
+  const healthcareModeFromNav = location.state?.healthcareMode as boolean | undefined;
+
+  // Track the active special mode from ChatInput (for theme overrides)
+  const [activeChatMode, setActiveChatMode] = useState<string | null>(
+    healthcareModeFromNav ? 'tm-healthcare' : null
+  );
 
   // Group chat mode detection
   const isGroupMode = !!groupChatId;
@@ -186,9 +197,9 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
     } : null
   );
 
-  // Clear navigation state after loading session to prevent reload on refresh
+  // Clear navigation state after loading session/healthcare mode to prevent reload on refresh
   useEffect(() => {
-    if (sessionToLoad) {
+    if (sessionToLoad || healthcareModeFromNav) {
       window.history.replaceState({}, '', '/');
     }
   }, []); // Only run once on mount
@@ -438,9 +449,15 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
     );
   }
 
+  // Override background for healthcare mode (green gradient instead of season theme)
+  const isHealthcareActive = activeChatMode === 'tm-healthcare';
+  const backgroundClass = isHealthcareActive
+    ? 'bg-gradient-to-t from-green-950 to-black to-50%'
+    : theme.background;
+
   return (
     <div
-      className={`min-h-screen ${theme.background} ${theme.text} relative overflow-hidden`}
+      className={`min-h-screen ${backgroundClass} ${theme.text} relative overflow-hidden transition-all duration-700`}
       style={{ minHeight: 'calc(var(--vh, 1vh) * 100)' }}
     >
       <main className="relative h-screen flex flex-col" style={{ height: 'calc(var(--vh, 1vh) * 100)' }}>
@@ -796,6 +813,8 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
               participants={participants}
               replyTo={replyTo}
               onClearReply={handleClearReply}
+              initialMode={healthcareModeFromNav ? 'tm-healthcare' : undefined}
+              onModeChange={setActiveChatMode}
             />
           </div>
         </div>
@@ -843,10 +862,11 @@ function AppContent() {
   return (
     <Routes>
       <Route path="/" element={<><SEOHead /><MainChatPage /></>} />
+      <Route path="/home" element={<><SEOHead title="Home" description="TimeMachine — the everything app. Chat, Canvas, Education, Healthcare, Shopping, and more." path="/home" /><HomePage /></>} />
       <Route path="/account" element={
         <div className={`min-h-screen ${theme.background} ${theme.text} relative overflow-hidden`}>
           <SEOHead title="Account" description="Manage your TimeMachine Chat account settings and profile." path="/account" noIndex />
-          <AccountPage onBack={() => navigate('/')} />
+          <AccountPage onBack={() => navigate('/home')} />
         </div>
       } />
       <Route path="/history" element={
@@ -866,6 +886,8 @@ function AppContent() {
       <Route path="/album" element={<><SEOHead title="Album" path="/album" noIndex /><AlbumPage /></>} />
       <Route path="/memories" element={<><SEOHead title="Memories" path="/memories" noIndex /><MemoriesPage /></>} />
       <Route path="/help" element={<><SEOHead title="Help" description="Get help with TimeMachine — learn about AI personas, group chats, image generation, and all features." path="/help" /><HelpPage /></>} />
+      <Route path="/notes" element={<><SEOHead title="Notes" description="Capture your thoughts with TimeMachine Notes — a powerful Notion-like editor built right into TimeMachine." path="/notes" /><NotesPage /></>} />
+      <Route path="/healthcare" element={<><SEOHead title="Healthcare" description="Search medicines, brands, generics, and drug information — including dosage, side effects, and indications. Powered by TimeMachine Healthcare." path="/healthcare" /><HealthcarePage /></>} />
       <Route path="/chat/:id" element={<><SEOHead title="Chat" noIndex /><ChatByIdPage /></>} />
       <Route path="/groupchat/:id" element={<><SEOHead title="Group Chat" noIndex /><GroupChatWrapper /></>} />
       <Route path="/groupchat/:id/settings" element={<><SEOHead title="Group Settings" noIndex /><GroupSettingsPage /></>} />

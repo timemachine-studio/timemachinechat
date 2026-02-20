@@ -11,12 +11,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Search } from 'lucide-react';
 import { ContourState, ModuleData } from './moduleRegistry';
 import { MODULE_META } from './moduleRegistry';
-import { ContourCommand, ContourCategory, CATEGORY_INFO } from './modules/commands';
+import { ContourCommand, ContourCategory, CATEGORY_INFO, groupByCategory } from './modules/commands';
 import {
   CalculatorView, UnitsView, CurrencyView, TimezoneView,
   ColorView, DateView, TimerView, RandomView, WordCountView,
   TranslatorView, DictionaryView, LoremView, JsonFormatView,
-  Base64View, UrlEncodeView, HashView, RegexView,
+  Base64View, UrlEncodeView, HashView, RegexView, HelpView,
+  GraphView,
   getIcon,
 } from './views';
 
@@ -67,18 +68,6 @@ const personaAccent: Record<string, AccentTheme> = {
   },
 };
 
-// ─── Helpers ───────────────────────────────────────────────────
-
-function groupByCategory(commands: ContourCommand[]): { category: ContourCategory; commands: ContourCommand[] }[] {
-  const grouped = new Map<ContourCategory, ContourCommand[]>();
-  for (const cmd of commands) {
-    const list = grouped.get(cmd.category) || [];
-    list.push(cmd);
-    grouped.set(cmd.category, list);
-  }
-  return Array.from(grouped.entries()).map(([category, commands]) => ({ category, commands }));
-}
-
 // ─── Module View Router ────────────────────────────────────────
 
 function ModuleContent({
@@ -93,6 +82,8 @@ function ModuleContent({
   onSetTimerDuration?: (seconds: number) => void;
 }) {
   switch (module.id) {
+    case 'graph':
+      return <GraphView module={module} accent={accent} />;
     case 'calculator':
       return <CalculatorView module={module} accent={accent} />;
     case 'units':
@@ -132,6 +123,8 @@ function ModuleContent({
       return <HashView module={module} accent={accent} onCopyValue={onCopyValue} />;
     case 'regex':
       return <RegexView module={module} accent={accent} onCopyValue={onCopyValue} />;
+    case 'help':
+      return <HelpView module={module} accent={accent} />;
     default:
       return null;
   }

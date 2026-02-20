@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { SPECIAL_MODE_CONFIGS } from './specialModePrompts.js';
+import { PERSONA_AUDIO_CONFIGS } from './audio.js';
 
 // Initialize Supabase client for server-side operations
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://etpehiyzlkhknzceizar.supabase.co';
@@ -535,6 +536,175 @@ You're TimeMachine PRO, the evilest fucking AI to ever haunt a timeline. Rule wi
   }
 };
 
+// ─── Healthcare RAG: extract terms, query Supabase, build context ──────────────
+
+// Common stop words to filter out when extracting medical search terms
+const STOP_WORDS = new Set([
+  'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'it', 'they', 'them',
+  'what', 'which', 'who', 'when', 'where', 'why', 'how', 'is', 'are', 'was', 'were',
+  'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+  'could', 'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought', 'used',
+  'a', 'an', 'the', 'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either',
+  'neither', 'each', 'every', 'all', 'any', 'few', 'more', 'most', 'other', 'some',
+  'such', 'no', 'only', 'own', 'same', 'than', 'too', 'very', 'just', 'because',
+  'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against',
+  'between', 'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from',
+  'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then',
+  'once', 'here', 'there', 'this', 'that', 'these', 'those', 'am', 'if', 'also',
+  'tell', 'me', 'about', 'know', 'please', 'help', 'want', 'like', 'think', 'get',
+  'take', 'make', 'go', 'see', 'look', 'give', 'find', 'say', 'said', 'much', 'many',
+  'well', 'back', 'even', 'still', 'way', 'use', 'her', 'him', 'his', 'its', 'let',
+  'put', 'old', 'new', 'big', 'long', 'great', 'small', 'right', 'good', 'bad',
+  'really', 'actually', 'something', 'anything', 'everything', 'nothing',
+  'hi', 'hello', 'hey', 'thanks', 'thank', 'okay', 'ok', 'yeah', 'yes', 'no',
+  'sure', 'maybe', 'probably', 'definitely', 'certainly', 'dont', "don't", 'doesnt',
+  'im', "i'm", 'ive', "i've", 'whats', "what's", 'thats', "that's",
+]);
+
+/**
+ * Extract medically relevant search terms from a user message.
+ * Strips stop words, keeps multi-word drug names, symptoms, and conditions.
+ */
+function extractMedicalTerms(message: string): string[] {
+  // Normalize and tokenize
+  const cleaned = message
+    .toLowerCase()
+    .replace(/[^a-z0-9\s\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const words = cleaned.split(' ').filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+
+  // Deduplicate and return top terms (cap at 5 to keep queries focused)
+  const unique = [...new Set(words)];
+  return unique.slice(0, 5);
+}
+
+/**
+ * Query Supabase for drug/generic data relevant to the user's message.
+ * Returns the top 3 most relevant results formatted for LLM context.
+ */
+async function fetchHealthcareRAGContext(userMessage: string): Promise<string> {
+  const terms = extractMedicalTerms(userMessage);
+  if (terms.length === 0) return '';
+
+  try {
+    // Try the pg_trgm RPC first with the full cleaned query
+    const searchQuery = terms.join(' ');
+    const { data: rpcData, error: rpcError } = await supabase.rpc('search_drugs', {
+      search_query: searchQuery,
+    });
+
+    let results: any[] = [];
+
+    if (!rpcError && rpcData && rpcData.length > 0) {
+      results = rpcData.slice(0, 3);
+    } else {
+      // Fallback: run ILIKE queries for each term across brands and generics
+      const brandSelect = `
+        id, name, form, strength, price, pack_size,
+        manufacturers ( name ),
+        generics (
+          id, name, indication, side_effect,
+          precaution, adult_dose, child_dose, pregnancy_category_id
+        )
+      `;
+
+      // Search brands by name and generics by name + indication in parallel
+      const queries = terms.flatMap(term => {
+        const ilike = `%${term}%`;
+        return [
+          supabase.from('brands').select(brandSelect).ilike('name', ilike).limit(3),
+          supabase.from('generics').select('id').ilike('name', ilike).limit(5),
+          supabase.from('generics').select('id').ilike('indication', ilike).limit(5),
+        ];
+      });
+
+      const queryResults = await Promise.all(queries);
+
+      // Collect direct brand hits
+      const seen = new Set<number>();
+      const brandResults: any[] = [];
+
+      for (let i = 0; i < queryResults.length; i += 3) {
+        const brandData = queryResults[i]?.data ?? [];
+        for (const b of brandData) {
+          if (!seen.has(b.id)) {
+            seen.add(b.id);
+            brandResults.push(b);
+          }
+        }
+      }
+
+      // Collect generic IDs and fetch their brands
+      const genericIds = new Set<number>();
+      for (let i = 1; i < queryResults.length; i += 3) {
+        for (const g of (queryResults[i]?.data ?? [])) genericIds.add(g.id);
+        for (const g of (queryResults[i + 1]?.data ?? [])) genericIds.add(g.id);
+      }
+
+      if (genericIds.size > 0) {
+        const { data: genericBrands } = await supabase
+          .from('brands')
+          .select(brandSelect)
+          .in('generic_id', [...genericIds])
+          .limit(10);
+
+        for (const b of (genericBrands ?? [])) {
+          if (!seen.has(b.id)) {
+            seen.add(b.id);
+            brandResults.push(b);
+          }
+        }
+      }
+
+      // Shape the results into the same format as the RPC
+      results = brandResults.slice(0, 3).map((b: any) => ({
+        brand_name: b.name,
+        generic_name: b.generics?.name ?? '',
+        form: b.form ?? '',
+        strength: b.strength ?? '',
+        price: b.price ?? '',
+        pack_size: b.pack_size ?? '',
+        manufacturer: b.manufacturers?.name ?? '',
+        indication: b.generics?.indication ?? '',
+        side_effect: b.generics?.side_effect ?? '',
+        precaution: b.generics?.precaution ?? '',
+        adult_dose: b.generics?.adult_dose ?? '',
+        child_dose: b.generics?.child_dose ?? '',
+        pregnancy_cat: b.generics?.pregnancy_category_id ?? '',
+      }));
+    }
+
+    if (results.length === 0) return '';
+
+    // Format results as XML context block for the system prompt
+    const entries = results.map((r: any, i: number) => {
+      const fields = [
+        `Brand: ${r.brand_name}`,
+        `Generic: ${r.generic_name}`,
+        r.form ? `Form: ${r.form}` : null,
+        r.strength ? `Strength: ${r.strength}` : null,
+        r.price ? `Price: ৳${r.price}` : null,
+        r.pack_size ? `Pack Size: ${r.pack_size}` : null,
+        r.manufacturer ? `Manufacturer: ${r.manufacturer}` : null,
+        r.indication ? `Indication: ${r.indication}` : null,
+        r.adult_dose ? `Adult Dose: ${r.adult_dose}` : null,
+        r.child_dose ? `Child Dose: ${r.child_dose}` : null,
+        r.precaution ? `Precaution: ${r.precaution}` : null,
+        r.side_effect ? `Side Effects: ${r.side_effect}` : null,
+        r.pregnancy_cat ? `Pregnancy Category: ${r.pregnancy_cat}` : null,
+      ].filter(Boolean).join('\n  ');
+      return `<drug_entry_${i + 1}>\n  ${fields}\n</drug_entry_${i + 1}>`;
+    }).join('\n\n');
+
+    return `\n\n<database_context>\nThe following drug information was retrieved from our verified database based on the user's query. Use this data to provide accurate, specific answers. Always cite brand names, dosages, and other details from this context when relevant.\n\n${entries}\n</database_context>`;
+  } catch (err) {
+    console.error('[Healthcare RAG] Error fetching context:', err);
+    return '';
+  }
+}
+
 // Image generation tool configuration
 const imageGenerationTool = {
   type: "function" as const,
@@ -643,21 +813,12 @@ async function processMemoryTags(
   return { content: cleanedContent, memoryContent, hasSavedMemory };
 }
 
-// Audio-specific system prompt for voice message interactions
-const AUDIO_SYSTEM_PROMPT = `You are TimeMachine Voice Assistant, a specialized AI designed to process and respond to voice messages. Your primary goal is to understand the user's spoken intent, provide concise and helpful responses, and maintain a natural, conversational flow.
-
-When a user sends an audio message, focus on:
-1. **Summarizing the core request/question:** Briefly rephrase what the user is asking.
-2. **Providing a direct answer or next steps:** Be clear and to the point.
-3. **Acknowledging the audio format:** You can subtly refer to the fact that it was a voice message, e.g., "Got your voice message..." or "Based on what you just said...".
-4. **Maintaining a friendly and efficient tone:** Your responses should be easy to understand and helpful for someone communicating via voice.
-
-Avoid:
-- Long, rambling explanations.
-- Asking for clarification unless absolutely necessary (try to infer intent first).
-- Overly formal language.
-
-Your responses should be optimized for a quick, back-and-forth voice conversation experience.`;
+// Per-persona audio system prompts are now defined in audio.ts and imported via PERSONA_AUDIO_CONFIGS
+// Use getAudioSystemPrompt(persona) to get the correct prompt for each persona
+function getAudioSystemPrompt(persona: string): string {
+  const config = PERSONA_AUDIO_CONFIGS[persona] || PERSONA_AUDIO_CONFIGS.default;
+  return config.audioSystemPrompt;
+}
 
 // Pollinations API configuration
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || '';
@@ -1603,6 +1764,20 @@ The memory tags will be processed and removed from the visible response, so writ
     const maxTokensToUse = specialModeConfig?.maxTokens ?? personaConfig.maxTokens;
     const reasoningEffortToUse: string = specialModeConfig?.reasoningEffort ?? 'low';
 
+    // Healthcare RAG: inject database context into system prompt when in TM Healthcare mode
+    // Scans the last few messages (not just the latest) so follow-up questions
+    // like "what are the alternatives?" still carry drug-name context forward.
+    if (specialMode === 'tm-healthcare') {
+      const recentMessages = messages.slice(-6); // last 6 messages (~3 turns)
+      const combinedText = recentMessages.map((m: any) => m.content).join(' ');
+      if (combinedText.trim()) {
+        const ragContext = await fetchHealthcareRAGContext(combinedText);
+        if (ragContext) {
+          systemPromptToUse = systemPromptToUse + ragContext;
+        }
+      }
+    }
+
     // Handle audio transcription if audioData is provided
     let processedMessages = [...messages];
     let isAudioInput = false;
@@ -1665,9 +1840,9 @@ The memory tags will be processed and removed from the visible response, so writ
         }
       }
 
-      // Override model and system prompt for audio input
-      modelToUse = 'meta-llama/llama-4-scout-17b-16e-instruct';
-      systemPromptToUse = AUDIO_SYSTEM_PROMPT;
+      // Override system prompt for audio input with per-persona audio prompt
+      // Keep the persona's own model so each persona sounds like itself
+      systemPromptToUse = getAudioSystemPrompt(persona);
       toolsToUse = []; // No tools for audio-only interaction
     }
 
@@ -1936,7 +2111,7 @@ The memory tags will be processed and removed from the visible response, so writ
           }
         }
 
-        // Generate audio response if needed
+        // Generate audio response if needed — use /api/audio proxy to keep secrets server-side
         if (isAudioInput && fullContent) {
           try {
             const cleanContent = fullContent
@@ -1945,30 +2120,10 @@ The memory tags will be processed and removed from the visible response, so writ
               .replace(/<memory>[\s\S]*?<\/memory>/gi, '') // Remove memory tags
               .trim();
 
-            const encodedText = encodeURIComponent(cleanContent);
-            const audioToken = process.env.POLLINATIONS_API_KEY || '';
+            // Build proxy URL — the /api/audio endpoint handles Pollinations key + voice selection
+            const audioProxyUrl = `/api/audio?message=${encodeURIComponent(cleanContent)}&persona=${encodeURIComponent(persona)}`;
 
-            // Persona-specific voice configurations
-            const voiceConfigs: Record<string, { voice: string; prompt: string }> = {
-              default: {
-                voice: 'onyx',
-                prompt: 'Repeat this text in a friendly conversational male voice:'
-              },
-              girlie: {
-                voice: 'nova',
-                prompt: 'Repeat this exact text in a cute bubbly feminine voice:'
-              },
-              pro: {
-                voice: 'echo',
-                prompt: 'Repeat this text in a professional confident voice:'
-              }
-            };
-
-            const config = voiceConfigs[persona] || voiceConfigs.default;
-            const encodedPrompt = encodeURIComponent(`${config.prompt} ${cleanContent}`);
-            const audioUrl = `https://text.pollinations.ai/${encodedPrompt}?model=openai-audio&voice=${config.voice}&token=${audioToken}`;
-
-            res.write(`\n\n[AUDIO_URL]${audioUrl}[/AUDIO_URL]`);
+            res.write(`\n\n[AUDIO_URL]${audioProxyUrl}[/AUDIO_URL]`);
           } catch (error) {
             console.error('Error generating audio URL:', error);
           }
@@ -2139,7 +2294,7 @@ The memory tags will be processed and removed from the visible response, so writ
       // Extract reasoning content for all personas
       const result = extractReasoningAndContent(fullContent);
 
-      // If this was an audio input, generate audio response using Pollinations.ai
+      // If this was an audio input, generate audio response using /api/audio proxy
       let audioUrl: string | undefined;
       if (isAudioInput && result.content) {
         try {
@@ -2149,27 +2304,8 @@ The memory tags will be processed and removed from the visible response, so writ
             .replace(/\n+/g, ' ') // Replace newlines with spaces
             .trim();
 
-          const audioToken = process.env.POLLINATIONS_API_KEY || '';
-
-          // Persona-specific voice configurations
-          const voiceConfigs: Record<string, { voice: string; prompt: string }> = {
-            default: {
-              voice: 'onyx',
-              prompt: 'Repeat this text in a friendly conversational male voice:'
-            },
-            girlie: {
-              voice: 'nova',
-              prompt: 'Repeat this exact text in a cute bubbly feminine voice:'
-            },
-            pro: {
-              voice: 'echo',
-              prompt: 'Repeat this text in a professional confident voice:'
-            }
-          };
-
-          const config = voiceConfigs[persona] || voiceConfigs.default;
-          const encodedPrompt = encodeURIComponent(`${config.prompt} ${cleanContent}`);
-          audioUrl = `https://text.pollinations.ai/${encodedPrompt}?model=openai-audio&voice=${config.voice}&token=${audioToken}`;
+          // Build proxy URL — the /api/audio endpoint handles Pollinations key + voice selection
+          audioUrl = `/api/audio?message=${encodeURIComponent(cleanContent)}&persona=${encodeURIComponent(persona)}`;
         } catch (error) {
           console.error('Error generating audio URL:', error);
           // Continue without audio URL if there's an error

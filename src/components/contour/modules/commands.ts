@@ -43,6 +43,15 @@ export const CONTOUR_COMMANDS: ContourCommand[] = [
     keywords: ['math', 'calc', 'compute', 'add', 'subtract', 'multiply', 'divide'],
     action: { type: 'inline', handler: 'calculator' },
   },
+  {
+    id: 'graph-plotter',
+    name: 'Graph Plotter',
+    description: 'Plot equations like y=sin(x), x²+3x+7, e^x',
+    icon: 'TrendingUp',
+    category: 'calculator',
+    keywords: ['graph', 'plot', 'equation', 'function', 'curve', 'desmos', 'sin', 'cos', 'math', 'chart'],
+    action: { type: 'inline', handler: 'graph-plotter' },
+  },
 
   // Unit Converters
   {
@@ -239,8 +248,8 @@ export const CONTOUR_COMMANDS: ContourCommand[] = [
     description: 'Get help and documentation',
     icon: 'HelpCircle',
     category: 'system',
-    keywords: ['help', 'docs', 'documentation', 'how', 'guide'],
-    action: { type: 'navigate', path: '/help' },
+    keywords: ['help', 'docs', 'documentation', 'how', 'guide', 'contour'],
+    action: { type: 'inline', handler: 'help' },
   },
 
   // Modes
@@ -306,6 +315,20 @@ export const CATEGORY_INFO: Record<ContourCategory, { label: string; icon: strin
   productivity: { label: 'Productivity', icon: 'Zap' },
   recents: { label: 'Recent', icon: 'Clock' },
 };
+
+/**
+ * Group commands by category, preserving insertion order.
+ * Used by both ContourPanel (render) and useContour (selection).
+ */
+export function groupByCategory(commands: ContourCommand[]): { category: ContourCategory; commands: ContourCommand[] }[] {
+  const grouped = new Map<ContourCategory, ContourCommand[]>();
+  for (const cmd of commands) {
+    const list = grouped.get(cmd.category) || [];
+    list.push(cmd);
+    grouped.set(cmd.category, list);
+  }
+  return Array.from(grouped.entries()).map(([category, commands]) => ({ category, commands }));
+}
 
 // ─── Fuzzy scoring ─────────────────────────────────────────────
 
