@@ -705,6 +705,196 @@ async function fetchHealthcareRAGContext(userMessage: string): Promise<string> {
   }
 }
 
+/**
+ * Chunk text into overlapping segments for RAG storage.
+ * Splits on paragraph boundaries when possible.
+ */
+function chunkText(text: string, chunkSize = 1000, overlap = 200): string[] {
+  const chunks: string[] = [];
+  if (!text || text.length === 0) return chunks;
+
+  // Split into paragraphs first
+  const paragraphs = text.split(/\n\s*\n/);
+  let current = '';
+
+  for (const para of paragraphs) {
+    const trimmed = para.trim();
+    if (!trimmed) continue;
+
+    if (current.length + trimmed.length + 1 > chunkSize && current.length > 0) {
+      chunks.push(current.trim());
+      // Keep overlap from the end of the previous chunk
+      const overlapStart = Math.max(0, current.length - overlap);
+      current = current.slice(overlapStart).trim() + '\n\n' + trimmed;
+    } else {
+      current += (current ? '\n\n' : '') + trimmed;
+    }
+  }
+  if (current.trim()) {
+    chunks.push(current.trim());
+  }
+
+  // If no paragraph splits produced chunks (e.g. one giant block), fall back to character splitting
+  if (chunks.length === 0 && text.length > 0) {
+    for (let i = 0; i < text.length; i += chunkSize - overlap) {
+      chunks.push(text.slice(i, i + chunkSize));
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * Process a PDF upload for RAG: extract text, chunk it, store in Supabase.
+ * Returns the document ID for future retrieval.
+ */
+async function processPdfForRag(
+  base64Data: string,
+  userId: string | null,
+  fileName: string | null
+): Promise<{ documentId: string; pageCount: number; chunkCount: number }> {
+  // Polyfills for pdfjs-dist / pdf-parse in Node environments
+  if (typeof globalThis !== 'undefined') {
+    if (!globalThis.DOMMatrix) {
+      // @ts-ignore
+      globalThis.DOMMatrix = class DOMMatrix {
+        constructor() { return [1, 0, 0, 1, 0, 0]; }
+      };
+    }
+    if (!globalThis.Path2D) {
+      // @ts-ignore
+      globalThis.Path2D = class Path2D { };
+    }
+    if (!globalThis.ImageData) {
+      // @ts-ignore
+      globalThis.ImageData = class ImageData {
+        data = []; width = 0; height = 0;
+      };
+    }
+  }
+
+  // Dynamically import pdf-parse to ensure polyfills are active before it evaluates
+  const pdfParseModule = await import('pdf-parse');
+  const pdfParse: any = 'default' in pdfParseModule ? (pdfParseModule as any).default : pdfParseModule;
+
+  // Strip data URI prefix if present
+  const raw = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+  const buffer = Buffer.from(raw, 'base64');
+  const data = await pdfParse(buffer);
+
+  const text = data.text || '';
+  const pageCount = data.numpages || 0;
+
+  if (!text.trim()) {
+    throw new Error('No text content could be extracted from the PDF');
+  }
+
+  // Generate a unique document ID
+  const documentId = crypto.randomUUID();
+
+  // Chunk the text
+  const chunks = chunkText(text);
+
+  // Store chunks in Supabase
+  const rows = chunks.map((content, index) => ({
+    document_id: documentId,
+    user_id: userId,
+    chunk_index: index,
+    content,
+    page_count: pageCount,
+    file_name: fileName
+  }));
+
+  // Insert in batches of 50
+  for (let i = 0; i < rows.length; i += 50) {
+    const batch = rows.slice(i, i + 50);
+    const { error } = await supabase.from('pdf_chunks').insert(batch);
+    if (error) {
+      console.error('[PDF RAG] Error inserting chunks:', error);
+      throw new Error('Failed to store PDF chunks');
+    }
+  }
+
+  return { documentId, pageCount, chunkCount: chunks.length };
+}
+
+/**
+ * Search stored PDF chunks for content relevant to the user's query.
+ * Uses PostgreSQL full-text search with ts_rank for relevance.
+ * Falls back to sequential chunk retrieval if FTS returns nothing.
+ */
+async function searchPdfChunks(
+  documentId: string,
+  query: string,
+  limit = 8
+): Promise<string> {
+  // Try the RPC full-text search first
+  const { data: rpcData, error: rpcError } = await supabase.rpc('search_pdf_chunks', {
+    p_document_id: documentId,
+    p_query: query,
+    p_limit: limit
+  });
+
+  let results: { chunk_index: number; content: string }[] = [];
+
+  if (!rpcError && rpcData && rpcData.length > 0) {
+    results = rpcData.map((r: any) => ({
+      chunk_index: r.chunk_index,
+      content: r.content
+    }));
+  } else {
+    // Fallback: ILIKE search with key terms from the query
+    const terms = query
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(t => t.length > 2)
+      .slice(0, 5);
+
+    if (terms.length > 0) {
+      // Build OR conditions for each term
+      const orFilter = terms.map(t => `content.ilike.%${t}%`).join(',');
+      const { data: ilikeData } = await supabase
+        .from('pdf_chunks')
+        .select('chunk_index, content')
+        .eq('document_id', documentId)
+        .or(orFilter)
+        .order('chunk_index', { ascending: true })
+        .limit(limit);
+
+      if (ilikeData && ilikeData.length > 0) {
+        results = ilikeData;
+      }
+    }
+
+    // Last resort: return the first few chunks (beginning of document)
+    if (results.length === 0) {
+      const { data: firstChunks } = await supabase
+        .from('pdf_chunks')
+        .select('chunk_index, content')
+        .eq('document_id', documentId)
+        .order('chunk_index', { ascending: true })
+        .limit(5);
+
+      if (firstChunks) {
+        results = firstChunks;
+      }
+    }
+  }
+
+  if (results.length === 0) return '';
+
+  // Sort by chunk_index for reading order
+  results.sort((a, b) => a.chunk_index - b.chunk_index);
+
+  // Format as XML context block
+  const formattedChunks = results
+    .map(r => `<chunk index="${r.chunk_index}">\n${r.content}\n</chunk>`)
+    .join('\n\n');
+
+  return `<pdf_context>\nThe following are the most relevant excerpts from the user's uploaded PDF document. Use ONLY these excerpts to answer the user's question about the document. If the answer is not found in these excerpts, say so.\n\n${formattedChunks}\n</pdf_context>`;
+}
+
 // Image generation tool configuration
 const imageGenerationTool = {
   type: "function" as const,
@@ -1314,7 +1504,7 @@ async function callCerebrasAirAPIStreaming(
     top_p: 1,
     stream: true,
     reasoning_effort: reasoningEffort
- };
+  };
 
   if (tools && tools.length > 0) {
     requestBody.tools = tools;
@@ -1470,7 +1660,7 @@ async function callGroqStandardAPIStreaming(
 // Helper function to process streaming buffer
 function processBuffer(line: string, controller: ReadableStreamDefaultController) {
   const trimmedLine = line.trim();
-  
+
   if (!trimmedLine || trimmedLine === 'data: [DONE]') {
     return;
   }
@@ -1479,10 +1669,10 @@ function processBuffer(line: string, controller: ReadableStreamDefaultController
     try {
       const jsonStr = trimmedLine.slice(6); // Remove 'data: ' prefix
       const data = JSON.parse(jsonStr);
-      
+
       if (data.choices && data.choices[0]) {
         const choice = data.choices[0];
-        
+
         // Handle content delta
         if (choice.delta && choice.delta.content) {
           controller.enqueue(new TextEncoder().encode(
@@ -1492,7 +1682,7 @@ function processBuffer(line: string, controller: ReadableStreamDefaultController
             }) + '\n'
           ));
         }
-        
+
         // Handle tool calls
         if (choice.delta && choice.delta.tool_calls) {
           controller.enqueue(new TextEncoder().encode(
@@ -1502,7 +1692,7 @@ function processBuffer(line: string, controller: ReadableStreamDefaultController
             }) + '\n'
           ));
         }
-        
+
         // Handle finish reason
         if (choice.finish_reason) {
           controller.enqueue(new TextEncoder().encode(
@@ -1678,7 +1868,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { messages, persona = 'default', imageData, audioData, heatLevel = 2, stream = false, inputImageUrls, imageDimensions, userId, userMemories, specialMode } = req.body;
+    const { messages, persona = 'default', imageData, audioData, heatLevel = 2, stream = false, inputImageUrls, imageDimensions, userId, userMemories, specialMode, pdfData, pdfFileName, pdfDocumentId } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Invalid messages format' });
@@ -1778,6 +1968,34 @@ The memory tags will be processed and removed from the visible response, so writ
       }
     }
 
+    // PDF RAG: chunk + store on first upload, then search relevant chunks
+    let pdfRagContext = '';
+    let resolvedPdfDocId: string | null = pdfDocumentId || null;
+
+    if (pdfData && !pdfDocumentId) {
+      // First upload: parse, chunk, and store in Supabase
+      try {
+        const result = await processPdfForRag(pdfData, userId || null, pdfFileName || null);
+        resolvedPdfDocId = result.documentId;
+        console.log(`[PDF RAG] Stored ${result.chunkCount} chunks (${result.pageCount} pages) as ${result.documentId}`);
+      } catch (err) {
+        console.error('[PDF RAG] Error processing PDF:', err);
+        pdfRagContext = '<pdf_context error="true">Failed to process the uploaded PDF. The file may be corrupted, password-protected, or contain only scanned images.</pdf_context>';
+      }
+    }
+
+    // Search for relevant chunks (works for both first upload and follow-up messages)
+    if (resolvedPdfDocId && !pdfRagContext) {
+      try {
+        // Use the latest user message as the search query
+        const lastUserMsg = [...messages].reverse().find((m: any) => !m.isAI);
+        const searchQuery = lastUserMsg?.content || 'summarize the document';
+        pdfRagContext = await searchPdfChunks(resolvedPdfDocId, searchQuery);
+      } catch (err) {
+        console.error('[PDF RAG] Error searching chunks:', err);
+      }
+    }
+
     // Handle audio transcription if audioData is provided
     let processedMessages = [...messages];
     let isAudioInput = false;
@@ -1815,7 +2033,7 @@ The memory tags will be processed and removed from the visible response, so writ
         }
 
         const transcriptionText = await transcriptionResponse.text();
-        
+
         // Replace the last message content with transcribed text if it was an audio message
         if (processedMessages.length > 0) {
           const lastMessage = processedMessages[processedMessages.length - 1];
@@ -1875,6 +2093,20 @@ The memory tags will be processed and removed from the visible response, so writ
       }
     }
 
+    // PDF RAG injection: enrich the last user message with relevant PDF chunks
+    if (pdfRagContext && apiMessages.length > 0) {
+      const lastMsgIndex = apiMessages.length - 1;
+      const lastMsg = apiMessages[lastMsgIndex];
+      const userPrompt = lastMsg.content?.startsWith('[PDF:') ? '' : (lastMsg.content || '');
+      const pdfLabel = pdfFileName ? `"${pdfFileName}"` : 'the uploaded PDF';
+
+      const enrichedContent = userPrompt
+        ? `${pdfRagContext}\n\nUser's question about ${pdfLabel}: ${userPrompt}`
+        : `${pdfRagContext}\n\nThe user uploaded ${pdfLabel}. Please summarize the key points from the relevant excerpts above.`;
+
+      apiMessages[lastMsgIndex] = { ...lastMsg, content: enrichedContent };
+    }
+
     // Handle streaming vs non-streaming responses
     if (stream) {
       // Set up streaming response headers
@@ -1883,6 +2115,11 @@ The memory tags will be processed and removed from the visible response, so writ
       res.setHeader('Connection', 'keep-alive');
 
       let streamingResponse: ReadableStream;
+
+      // Emit the PDF document ID so the frontend can use it for follow-up messages
+      if (resolvedPdfDocId) {
+        res.write(`[PDF_DOC_ID]${resolvedPdfDocId}[/PDF_DOC_ID]`);
+      }
 
       // Image OCR pipeline: extract text from images before calling persona AI
       if (hasImageInput && imageUrlsForOCR.length > 0) {
@@ -2316,24 +2553,25 @@ The memory tags will be processed and removed from the visible response, so writ
       return res.status(200).json({
         content: result.content,
         thinking: result.thinking,
-        audioUrl: audioUrl
+        audioUrl: audioUrl,
+        ...(resolvedPdfDocId ? { pdfDocumentId: resolvedPdfDocId } : {})
       });
     }
 
   } catch (error) {
     console.error('AI Proxy Error:', error);
-    
+
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    
+
     // Check for rate limit errors
     if (errorMessage.includes('Rate limit') || errorMessage.includes('429')) {
-      return res.status(429).json({ 
+      return res.status(429).json({
         error: 'Rate limit exceeded',
         type: 'rateLimit'
       });
     }
-    
-    return res.status(500).json({ 
+
+    return res.status(500).json({
       error: 'We are facing huge load on our servers and thus we\'ve had to temporarily limit access to maintain system stability. Please be patient, we hate this as much as you do but this thing doesn\'t grow on trees :")'
     });
   }
