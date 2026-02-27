@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation, useParams, useSearchParams, Navigate } from 'react-router-dom';
 import { ChatInput } from './components/chat/ChatInput';
-import { BrandLogo } from './components/brand/BrandLogo';
+import { BrandLogo, BrandOverride } from './components/brand/BrandLogo';
 import { MusicPlayer } from './components/music/MusicPlayer';
 import { YouTubePlayer } from './components/music/YouTubePlayer';
 import { Star, Users, Settings } from 'lucide-react';
@@ -114,9 +114,11 @@ function ChatByIdPage() {
 // Main Chat Page component - defined OUTSIDE to prevent re-renders
 interface MainChatPageProps {
   groupChatId?: string;
+  brandOverride?: BrandOverride;
+  backgroundClass?: string;
 }
 
-function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
+function MainChatPage({ groupChatId, brandOverride, backgroundClass: customBackgroundClass }: MainChatPageProps = {}) {
   const { theme } = useTheme();
   const { user, profile, loading: authLoading, needsOnboarding, updateLastPersona } = useAuth();
   const navigate = useNavigate();
@@ -457,12 +459,15 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
 
   // Override background for healthcare mode (green gradient instead of season theme)
   const isHealthcareActive = activeChatMode === 'tm-healthcare';
-  const backgroundClass = isHealthcareActive
-    ? 'bg-gradient-to-t from-green-950 to-black to-50%'
-    : theme.background;
+  const backgroundClass = customBackgroundClass
+    ? customBackgroundClass
+    : isHealthcareActive
+      ? 'bg-gradient-to-t from-green-950 to-black to-50%'
+      : theme.background;
 
   return (
     <div
+      id={brandOverride ? 'reveoule-theme' : undefined}
       className={`min-h-screen ${backgroundClass} ${theme.text} relative overflow-hidden transition-all duration-700`}
       style={{ minHeight: 'calc(var(--vh, 1vh) * 100)' }}
     >
@@ -478,6 +483,7 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
               onOpenAccount={handleOpenAccount}
               onOpenHistory={handleOpenHistory}
               onOpenSettings={handleOpenSettings}
+              brandOverride={brandOverride}
             />
             <div className="flex items-center gap-2">
               {isAnonymous && (
@@ -795,6 +801,7 @@ function MainChatPage({ groupChatId }: MainChatPageProps = {}) {
                   currentUserId={user?.id}
                   onReply={isCollaborative ? handleReply : undefined}
                   onReact={isCollaborative ? handleReact : undefined}
+                  brandOverride={brandOverride}
                 />
               ) : (
                 <StageMode
@@ -868,6 +875,20 @@ function AppContent() {
   return (
     <Routes>
       <Route path="/" element={<><SEOHead /><MainChatPage /></>} />
+      <Route path="/reveoule" element={
+        <>
+          <SEOHead title="Rêveoulé" description="Beauty products collab" path="/reveoule" noIndex />
+          <MainChatPage
+            brandOverride={{
+              name: 'Rêveoulé',
+              textColorClass: 'text-[#59090C]',
+              glowColor: 'transparent',
+              personaName: 'Skin Advisor'
+            }}
+            backgroundClass="reveoule-bg"
+          />
+        </>
+      } />
       <Route path="/home" element={<><SEOHead title="Home" description="TimeMachine — the everything app. Chat, Canvas, Education, Healthcare, Shopping, and more." path="/home" /><HomePage /></>} />
       <Route path="/account" element={
         <div className={`min-h-screen ${theme.background} ${theme.text} relative overflow-hidden`}>
