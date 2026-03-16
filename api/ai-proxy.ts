@@ -1485,10 +1485,9 @@ Output ONLY the extracted content, nothing else.`
 async function callCerebrasAirAPIStreaming(
   messages: any[],
   tools?: any[],
-  model: string = 'gpt-oss-120b',
+  model: string = 'qwen-3-235b-a22b-instruct-2507',
   temperature: number = 0.9,
   maxTokens: number = 2000,
-  reasoningEffort: string = 'low'
 ): Promise<ReadableStream> {
   const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
 
