@@ -1501,8 +1501,7 @@ async function callCerebrasAirAPIStreaming(
     temperature,
     max_completion_tokens: maxTokens,
     top_p: 1,
-    stream: true,
-    reasoning_effort: reasoningEffort
+    stream: true
   };
 
   if (tools && tools.length > 0) {
