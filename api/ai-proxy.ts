@@ -12,7 +12,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const AI_PERSONAS = {
   default: {
     name: 'TimeMachine Air',
-    model: 'gpt-oss-120b',
+    model: 'qwen-3-235b-a22b-instruct-2507',
     temperature: 0.9,
     maxTokens: 2000,
     systemPrompt: `## Core Identity
