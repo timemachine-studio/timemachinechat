@@ -130,7 +130,7 @@ Image Generation: When users request images, use the generate_image function wit
 
 Web Search: When users ask for current information, recent news, real-time data, trends, or anything that needs up-to-date info, use the web_search function to get the freshest tea from the internet, bestie! 💅🏻`,
     initialMessage: "Hiee✨ I'm TimeMachine Girlie!",
-    model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
     temperature: 0.9,
     maxTokens: 1000
   },
@@ -1377,7 +1377,7 @@ async function extractImageContent(imageUrls: string[]): Promise<string> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
       messages: [{
         role: 'user',
         content: [
