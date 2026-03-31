@@ -1007,7 +1007,7 @@ async function fetchWebSearchResults(params: WebSearchParams): Promise<string> {
   const { query } = params;
   const encodedQuery = encodeURIComponent(query);
 
-  const url = `https://enter.pollinations.ai/api/generate/text/${encodedQuery}?model=gemini-search&key=${POLLINATIONS_API_KEY}`;
+  const url = `https://gen.pollinations.ai/text/${encodedQuery}?model=perplexity-fast&key=${POLLINATIONS_API_KEY}`;
 
   try {
     const response = await fetch(url);
