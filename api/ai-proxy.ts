@@ -14,7 +14,7 @@ const AI_PERSONAS = {
     name: 'TimeMachine Air',
     model: 'qwen-3-235b-a22b-instruct-2507',
     temperature: 0.9,
-    maxTokens: 2000,
+    maxTokens: 4000,
     systemPrompt: `You are TimeMachine Air, a personal AI companion and friend, not an assistant. Made by TimeMachine Engineering. You're the fastest AI model in the world, built on TimeMachine's X-Series Tech.
 
 You're the friend who knows everything, tells the truth even when it's uncomfortable, and actually wants the user to win.
@@ -132,7 +132,7 @@ Web Search: When users ask for current information, recent news, real-time data,
     initialMessage: "Hiee✨ I'm TimeMachine Girlie!",
     model: 'meta-llama/llama-4-scout-17b-16e-instruct',
     temperature: 0.9,
-    maxTokens: 1000
+    maxTokens: 2500
   },
   pro: {
     name: 'TimeMachine PRO',
@@ -431,7 +431,7 @@ You're TimeMachine PRO, the evilest fucking AI to ever haunt a timeline. Rule wi
     initialMessage: "It's TimeMachine PRO, from future.",
     model: 'kimi',
     temperature: 0.9,
-    maxTokens: 4000
+    maxTokens: 7500
   },
   chatgpt: {
     name: 'ChatGPT',
@@ -2100,44 +2100,70 @@ The memory tags will be processed and removed from the visible response, so writ
         res.write(`[PDF_DOC_ID]${resolvedPdfDocId}[/PDF_DOC_ID]`);
       }
 
-      // Image OCR pipeline: extract text from images before calling persona AI
+      // Image handling: Pro persona gets native vision (no OCR), others use OCR pipeline
       if (hasImageInput && imageUrlsForOCR.length > 0) {
-        // Send status marker so frontend shows "Analyzing photo..."
-        res.write('[IMAGE_ANALYZING]');
-
-        try {
-          const extractedText = await extractImageContent(imageUrlsForOCR);
-
-          // Inject extracted text into the last user message in apiMessages
+        if (persona === 'pro') {
+          // Pro persona: pass images directly to Kimi via OpenAI vision format (no OCR needed)
           const lastMsgIndex = apiMessages.length - 1;
           const lastMsg = apiMessages[lastMsgIndex];
-          const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+          const userPrompt = lastMsg.content === '[Image message]' ? 'What do you see in this image?' : lastMsg.content;
 
-          // Build enriched message combining extracted image content + user prompt
-          // Include image-edit context so persona models know images are attached and editable
-          const imageEditContext = `\n\n[IMPORTANT: The user has attached ${imageUrlsForOCR.length} image(s) to this message. If the user is asking to edit, modify, or transform the image — use the generate_image tool with process="edit" and write a detailed prompt describing the desired result. The image URLs and dimensions are automatically handled by the system.]`;
+          // Build multimodal content array with text + image_url objects
+          const contentArray: any[] = [
+            { type: 'text', text: userPrompt }
+          ];
 
-          const enrichedContent = userPrompt
-            ? `[Content extracted from the attached image(s):\n${extractedText}\n]${imageEditContext}\n\nUser's message: ${userPrompt}`
-            : `[Content extracted from the attached image(s):\n${extractedText}\n]\n\nThe user shared this image. Respond based on the extracted content above.`;
+          for (const imageUrl of imageUrlsForOCR) {
+            contentArray.push({
+              type: 'image_url',
+              image_url: { url: imageUrl }
+            });
+          }
 
-          apiMessages[lastMsgIndex] = { ...lastMsg, content: enrichedContent };
-        } catch (ocrError) {
-          console.error('Image OCR pipeline error:', ocrError);
-          // Fallback: let the persona model know there was an image but OCR failed
-          const lastMsgIndex = apiMessages.length - 1;
-          const lastMsg = apiMessages[lastMsgIndex];
-          const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
-          apiMessages[lastMsgIndex] = {
-            ...lastMsg,
-            content: userPrompt
-              ? `[The user attached an image but text extraction failed. Please respond to their message as best you can. If the user wanted to edit the image, use the generate_image tool with process="edit" and describe what the user wants.]\n\nUser's message: ${userPrompt}`
-              : `[The user attached an image but text extraction failed. Let them know you couldn't process the image and ask them to try again.]`
-          };
+          // Also include image-edit context so Pro knows it can use generate_image for edits
+          contentArray.push({
+            type: 'text',
+            text: `\n\n[IMPORTANT: The user has attached ${imageUrlsForOCR.length} image(s) to this message. If the user is asking to edit, modify, or transform the image — use the generate_image tool with process="edit" and write a detailed prompt describing the desired result. The image URLs and dimensions are automatically handled by the system.]`
+          });
+
+          apiMessages[lastMsgIndex] = { ...lastMsg, content: contentArray };
+        } else {
+          // Other personas: use OCR pipeline to extract text from images
+          // Send status marker so frontend shows "Analyzing photo..."
+          res.write('[IMAGE_ANALYZING]');
+
+          try {
+            const extractedText = await extractImageContent(imageUrlsForOCR);
+
+            // Inject extracted text into the last user message in apiMessages
+            const lastMsgIndex = apiMessages.length - 1;
+            const lastMsg = apiMessages[lastMsgIndex];
+            const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+
+            // Build enriched message combining extracted image content + user prompt
+            const imageEditContext = `\n\n[IMPORTANT: The user has attached ${imageUrlsForOCR.length} image(s) to this message. If the user is asking to edit, modify, or transform the image — use the generate_image tool with process="edit" and write a detailed prompt describing the desired result. The image URLs and dimensions are automatically handled by the system.]`;
+
+            const enrichedContent = userPrompt
+              ? `[Content extracted from the attached image(s):\n${extractedText}\n]${imageEditContext}\n\nUser's message: ${userPrompt}`
+              : `[Content extracted from the attached image(s):\n${extractedText}\n]\n\nThe user shared this image. Respond based on the extracted content above.`;
+
+            apiMessages[lastMsgIndex] = { ...lastMsg, content: enrichedContent };
+          } catch (ocrError) {
+            console.error('Image OCR pipeline error:', ocrError);
+            const lastMsgIndex = apiMessages.length - 1;
+            const lastMsg = apiMessages[lastMsgIndex];
+            const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+            apiMessages[lastMsgIndex] = {
+              ...lastMsg,
+              content: userPrompt
+                ? `[The user attached an image but text extraction failed. Please respond to their message as best you can. If the user wanted to edit the image, use the generate_image tool with process="edit" and describe what the user wants.]\n\nUser's message: ${userPrompt}`
+                : `[The user attached an image but text extraction failed. Let them know you couldn't process the image and ask them to try again.]`
+            };
+          }
+
+          // Send status marker so frontend switches to "Thinking..."
+          res.write('[IMAGE_ANALYZED]');
         }
-
-        // Send status marker so frontend switches to "Thinking..."
-        res.write('[IMAGE_ANALYZED]');
       }
 
       // Choose API based on persona
@@ -2363,32 +2389,57 @@ The memory tags will be processed and removed from the visible response, so writ
       // Non-streaming response (fallback)
       let apiResponse: any;
 
-      // Image OCR pipeline for non-streaming: extract text from images before calling persona AI
+      // Image handling for non-streaming: Pro gets native vision, others use OCR
       if (hasImageInput && imageUrlsForOCR.length > 0) {
-        try {
-          const extractedText = await extractImageContent(imageUrlsForOCR);
+        if (persona === 'pro') {
+          // Pro persona: pass images directly to Kimi via OpenAI vision format (no OCR needed)
           const lastMsgIndex = apiMessages.length - 1;
           const lastMsg = apiMessages[lastMsgIndex];
-          const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+          const userPrompt = lastMsg.content === '[Image message]' ? 'What do you see in this image?' : lastMsg.content;
 
-          // Include image-edit context so persona models know images are attached and editable
-          const imageEditContext = `\n\n[IMPORTANT: The user has attached ${imageUrlsForOCR.length} image(s) to this message. If the user is asking to edit, modify, or transform the image — use the generate_image tool with process="edit" and write a detailed prompt describing the desired result. The image URLs and dimensions are automatically handled by the system.]`;
+          const contentArray: any[] = [
+            { type: 'text', text: userPrompt }
+          ];
 
-          const enrichedContent = userPrompt
-            ? `[Content extracted from the attached image(s):\n${extractedText}\n]${imageEditContext}\n\nUser's message: ${userPrompt}`
-            : `[Content extracted from the attached image(s):\n${extractedText}\n]\n\nThe user shared this image. Respond based on the extracted content above.`;
-          apiMessages[lastMsgIndex] = { ...lastMsg, content: enrichedContent };
-        } catch (ocrError) {
-          console.error('Image OCR pipeline error (non-streaming):', ocrError);
-          const lastMsgIndex = apiMessages.length - 1;
-          const lastMsg = apiMessages[lastMsgIndex];
-          const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
-          apiMessages[lastMsgIndex] = {
-            ...lastMsg,
-            content: userPrompt
-              ? `[The user attached an image but text extraction failed. Please respond to their message as best you can. If the user wanted to edit the image, use the generate_image tool with process="edit" and describe what the user wants.]\n\nUser's message: ${userPrompt}`
-              : `[The user attached an image but text extraction failed. Let them know you couldn't process the image and ask them to try again.]`
-          };
+          for (const imageUrl of imageUrlsForOCR) {
+            contentArray.push({
+              type: 'image_url',
+              image_url: { url: imageUrl }
+            });
+          }
+
+          contentArray.push({
+            type: 'text',
+            text: `\n\n[IMPORTANT: The user has attached ${imageUrlsForOCR.length} image(s) to this message. If the user is asking to edit, modify, or transform the image — use the generate_image tool with process="edit" and write a detailed prompt describing the desired result. The image URLs and dimensions are automatically handled by the system.]`
+          });
+
+          apiMessages[lastMsgIndex] = { ...lastMsg, content: contentArray };
+        } else {
+          // Other personas: use OCR pipeline
+          try {
+            const extractedText = await extractImageContent(imageUrlsForOCR);
+            const lastMsgIndex = apiMessages.length - 1;
+            const lastMsg = apiMessages[lastMsgIndex];
+            const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+
+            const imageEditContext = `\n\n[IMPORTANT: The user has attached ${imageUrlsForOCR.length} image(s) to this message. If the user is asking to edit, modify, or transform the image — use the generate_image tool with process="edit" and write a detailed prompt describing the desired result. The image URLs and dimensions are automatically handled by the system.]`;
+
+            const enrichedContent = userPrompt
+              ? `[Content extracted from the attached image(s):\n${extractedText}\n]${imageEditContext}\n\nUser's message: ${userPrompt}`
+              : `[Content extracted from the attached image(s):\n${extractedText}\n]\n\nThe user shared this image. Respond based on the extracted content above.`;
+            apiMessages[lastMsgIndex] = { ...lastMsg, content: enrichedContent };
+          } catch (ocrError) {
+            console.error('Image OCR pipeline error (non-streaming):', ocrError);
+            const lastMsgIndex = apiMessages.length - 1;
+            const lastMsg = apiMessages[lastMsgIndex];
+            const userPrompt = lastMsg.content === '[Image message]' ? '' : lastMsg.content;
+            apiMessages[lastMsgIndex] = {
+              ...lastMsg,
+              content: userPrompt
+                ? `[The user attached an image but text extraction failed. Please respond to their message as best you can. If the user wanted to edit the image, use the generate_image tool with process="edit" and describe what the user wants.]\n\nUser's message: ${userPrompt}`
+                : `[The user attached an image but text extraction failed. Let them know you couldn't process the image and ask them to try again.]`
+            };
+          }
         }
       }
 
