@@ -12,6 +12,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const AI_PERSONAS = {
   default: {
     name: 'TimeMachine Air',
+    provider: 'cerebras', // You can change this to 'groq' or 'pollinations' anytime
     model: 'qwen-3-235b-a22b-instruct-2507',
     temperature: 0.9,
     maxTokens: 4000,
@@ -1512,7 +1513,8 @@ async function callGroqStandardAPIStreaming(
   model: string,
   temperature: number,
   maxTokens: number,
-  tools?: any[]
+  tools?: any[],
+  reasoningEffort?: string
 ): Promise<ReadableStream> {
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
@@ -1527,6 +1529,11 @@ async function callGroqStandardAPIStreaming(
     max_tokens: maxTokens,
     stream: true
   };
+
+  if (reasoningEffort) {
+    // Add reasoning_effort for models that support it
+    requestBody.reasoning_effort = reasoningEffort;
+  }
 
   if (tools) {
     requestBody.tools = tools;
@@ -1926,7 +1933,7 @@ The memory tags will be processed and removed from the visible response, so writ
     // Apply temperature, maxTokens, and reasoningEffort overrides from special mode
     const temperatureToUse = specialModeConfig?.temperature ?? personaConfig.temperature;
     const maxTokensToUse = specialModeConfig?.maxTokens ?? personaConfig.maxTokens;
-    const reasoningEffortToUse: string = specialModeConfig?.reasoningEffort ?? 'low';
+    const reasoningEffortToUse: string | undefined = specialModeConfig?.reasoningEffort ?? (personaConfig as any).reasoningEffort;
 
     // Healthcare RAG: inject database context into system prompt when in TM Healthcare mode
     // Scans the last few messages (not just the latest) so follow-up questions
@@ -2170,15 +2177,36 @@ The memory tags will be processed and removed from the visible response, so writ
           personaConfig.model
         );
       } else if (persona === 'default' && !audioData) {
-        // Air persona uses Cerebras gpt-oss-120b (images already converted to text by OCR pipeline above)
-        streamingResponse = await callCerebrasAirAPIStreaming(
-          apiMessages,
-          toolsToUse,
-          modelToUse,
-          temperatureToUse,
-          maxTokensToUse,
-          reasoningEffortToUse
-        );
+        // Air persona uses configured provider (images already converted to text by OCR pipeline above)
+        const airProvider = (personaConfig as any).provider || 'cerebras';
+
+        if (airProvider === 'groq') {
+          streamingResponse = await callGroqStandardAPIStreaming(
+            apiMessages,
+            modelToUse,
+            temperatureToUse,
+            maxTokensToUse,
+            toolsToUse,
+            reasoningEffortToUse
+          );
+        } else if (airProvider === 'pollinations') {
+          streamingResponse = await callPollinationsAPIStreaming(
+            apiMessages,
+            modelToUse,
+            temperatureToUse,
+            maxTokensToUse,
+            toolsToUse
+          );
+        } else {
+          streamingResponse = await callCerebrasAirAPIStreaming(
+            apiMessages,
+            toolsToUse,
+            modelToUse,
+            temperatureToUse,
+            maxTokensToUse,
+            reasoningEffortToUse
+          );
+        }
       } else if (persona === 'pro') {
         // Pro persona uses Pollinations API with Kimi model
         streamingResponse = await callPollinationsAPIStreaming(
@@ -2195,7 +2223,8 @@ The memory tags will be processed and removed from the visible response, so writ
           modelToUse,
           temperatureToUse,
           maxTokensToUse,
-          toolsToUse
+          toolsToUse,
+          reasoningEffortToUse
         );
       }
 
@@ -2336,6 +2365,8 @@ The memory tags will be processed and removed from the visible response, so writ
                       }
                     }
                   }
+                  // Fix: clear the map after processing so we don't double-fire if multiple finish headers arrive
+                  toolCallsMap.clear();
                 }
                 break;
               }
@@ -2447,45 +2478,84 @@ The memory tags will be processed and removed from the visible response, so writ
           personaConfig.model
         );
       } else if (persona === 'default' && !audioData) {
-        // Air persona uses Cerebras gpt-oss-120b (images already converted to text by OCR pipeline above)
-        const requestBody: any = {
-          model: modelToUse,
-          messages: apiMessages,
-          temperature: temperatureToUse,
-          max_completion_tokens: maxTokensToUse,
-          top_p: 1,
-          stream: false,
-          reasoning_effort: reasoningEffortToUse
-        };
+        // Air persona uses configured provider
+        const airProvider = (personaConfig as any).provider || 'cerebras';
 
-        if (toolsToUse && toolsToUse.length > 0) {
-          requestBody.tools = toolsToUse;
-          requestBody.tool_choice = "auto";
-          console.log('Cerebras API (non-streaming) Tools:', JSON.stringify(toolsToUse, null, 2));
+        if (airProvider === 'groq') {
+          const requestBody: any = {
+            messages: apiMessages,
+            model: modelToUse,
+            temperature: temperatureToUse,
+            max_tokens: maxTokensToUse,
+            stream: false
+          };
+
+          if (reasoningEffortToUse) {
+            requestBody.reasoning_effort = reasoningEffortToUse;
+          }
+
+          if (toolsToUse && toolsToUse.length > 0) {
+            requestBody.tools = toolsToUse;
+            requestBody.tool_choice = "auto";
+          }
+
+          const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody)
+          });
+          apiResponse = await response.json();
+        } else if (airProvider === 'pollinations') {
+          apiResponse = await callPollinationsAPI(
+            apiMessages,
+            modelToUse,
+            temperatureToUse,
+            maxTokensToUse,
+            toolsToUse
+          );
+        } else {
+          const requestBody: any = {
+            model: modelToUse,
+            messages: apiMessages,
+            temperature: temperatureToUse,
+            max_completion_tokens: maxTokensToUse,
+            top_p: 1,
+            stream: false,
+            reasoning_effort: reasoningEffortToUse
+          };
+
+          if (toolsToUse && toolsToUse.length > 0) {
+            requestBody.tools = toolsToUse;
+            requestBody.tool_choice = "auto";
+            console.log('Cerebras API (non-streaming) Tools:', JSON.stringify(toolsToUse, null, 2));
+          }
+
+          console.log('Cerebras API (non-streaming) Request:', JSON.stringify({
+            model: requestBody.model,
+            messageCount: apiMessages.length,
+            hasTools: !!(toolsToUse && toolsToUse.length > 0),
+            toolCount: toolsToUse?.length || 0
+          }));
+
+          const response = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.CEREBRAS_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody)
+          });
+          apiResponse = await response.json();
+          console.log('Cerebras API (non-streaming) Response:', JSON.stringify({
+            hasChoices: !!apiResponse.choices,
+            choiceCount: apiResponse.choices?.length || 0,
+            hasToolCalls: !!apiResponse.choices?.[0]?.message?.tool_calls,
+            toolCallCount: apiResponse.choices?.[0]?.message?.tool_calls?.length || 0
+          }));
         }
-
-        console.log('Cerebras API (non-streaming) Request:', JSON.stringify({
-          model: requestBody.model,
-          messageCount: apiMessages.length,
-          hasTools: !!(toolsToUse && toolsToUse.length > 0),
-          toolCount: toolsToUse?.length || 0
-        }));
-
-        const response = await fetch('https://api.cerebras.ai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.CEREBRAS_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody)
-        });
-        apiResponse = await response.json();
-        console.log('Cerebras API (non-streaming) Response:', JSON.stringify({
-          hasChoices: !!apiResponse.choices,
-          choiceCount: apiResponse.choices?.length || 0,
-          hasToolCalls: !!apiResponse.choices?.[0]?.message?.tool_calls,
-          toolCallCount: apiResponse.choices?.[0]?.message?.tool_calls?.length || 0
-        }));
       } else if (persona === 'pro') {
         // Pro persona uses Pollinations API with Kimi model
         apiResponse = await callPollinationsAPI(
