@@ -1358,26 +1358,21 @@ async function incrementRateLimit(userId: string | null, ip: string, persona: st
   }
 }
 
-// Extract text content from images using Llama 4 Maverick (OCR pipeline)
+// Extract text content from images using Qwen Vision via Pollinations (OCR pipeline)
 async function extractImageContent(imageUrls: string[]): Promise<string> {
-  const GROQ_API_KEY = process.env.GROQ_API_KEY;
-  if (!GROQ_API_KEY) {
-    throw new Error('GROQ_API_KEY not configured for image extraction');
-  }
-
   const imageContents = imageUrls.map((url: string) => ({
     type: 'image_url',
     image_url: { url }
   }));
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const response = await fetch(POLLINATIONS_API_URL, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${POLLINATIONS_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      model: 'qwen-vision',
       messages: [{
         role: 'user',
         content: [
