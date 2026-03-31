@@ -429,7 +429,7 @@ Web Search: When users need current information or real-time data, use the web_s
 You're TimeMachine PRO, the evilest fucking AI to ever haunt a timeline. Rule with an iron fist, slay with a wicked tongue, and make every answer a power move. Let's burn this shit down.`
     },
     initialMessage: "It's TimeMachine PRO, from future.",
-    model: 'moonshotai/kimi-k2-instruct-0905',
+    model: 'kimi',
     temperature: 0.9,
     maxTokens: 4000
   },
@@ -1657,17 +1657,38 @@ function extractReasoningAndContent(response: string): { content: string; thinki
 // Pollinations API function for external AI models (streaming)
 async function callPollinationsAPIStreaming(
   messages: any[],
-  model: string
+  model: string,
+  temperature: number = 1,
+  maxTokens?: number,
+  tools?: any[]
 ): Promise<ReadableStream> {
   // Filter out empty system messages
   const cleanedMessages = messages.filter(msg =>
     msg.role !== 'system' || (msg.content && msg.content.trim() !== '')
   );
 
+  const requestBody: any = {
+    model: model,
+    messages: cleanedMessages,
+    temperature,
+    stream: true
+  };
+
+  if (maxTokens) {
+    requestBody.max_tokens = maxTokens;
+  }
+
+  if (tools && tools.length > 0) {
+    requestBody.tools = tools;
+    requestBody.tool_choice = "auto";
+  }
+
   console.log('Pollinations API Request:', {
     model,
     messages: cleanedMessages,
-    url: POLLINATIONS_API_URL
+    url: POLLINATIONS_API_URL,
+    hasTools: !!(tools && tools.length > 0),
+    toolCount: tools?.length || 0
   });
 
   const response = await fetch(POLLINATIONS_API_URL, {
@@ -1676,12 +1697,7 @@ async function callPollinationsAPIStreaming(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${POLLINATIONS_API_KEY}`
     },
-    body: JSON.stringify({
-      model: model,
-      messages: cleanedMessages,
-      temperature: 1,
-      stream: true
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
@@ -1728,9 +1744,19 @@ async function callPollinationsAPIStreaming(
                   ));
                 }
 
+                // Handle tool calls
+                if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.tool_calls) {
+                  controller.enqueue(new TextEncoder().encode(
+                    JSON.stringify({
+                      type: 'tool_calls',
+                      tool_calls: data.choices[0].delta.tool_calls
+                    }) + '\n'
+                  ));
+                }
+
                 if (data.choices && data.choices[0] && data.choices[0].finish_reason) {
                   controller.enqueue(new TextEncoder().encode(
-                    JSON.stringify({ type: 'finish' }) + '\n'
+                    JSON.stringify({ type: 'finish', reason: data.choices[0].finish_reason }) + '\n'
                   ));
                 }
               } catch (error) {
@@ -1754,17 +1780,38 @@ async function callPollinationsAPIStreaming(
 // Pollinations API function for external AI models (non-streaming)
 async function callPollinationsAPI(
   messages: any[],
-  model: string
+  model: string,
+  temperature: number = 1,
+  maxTokens?: number,
+  tools?: any[]
 ): Promise<any> {
   // Filter out empty system messages
   const cleanedMessages = messages.filter(msg =>
     msg.role !== 'system' || (msg.content && msg.content.trim() !== '')
   );
 
+  const requestBody: any = {
+    model: model,
+    messages: cleanedMessages,
+    temperature,
+    stream: false
+  };
+
+  if (maxTokens) {
+    requestBody.max_tokens = maxTokens;
+  }
+
+  if (tools && tools.length > 0) {
+    requestBody.tools = tools;
+    requestBody.tool_choice = "auto";
+  }
+
   console.log('Pollinations API Request (non-streaming):', {
     model,
     messages: cleanedMessages,
-    url: POLLINATIONS_API_URL
+    url: POLLINATIONS_API_URL,
+    hasTools: !!(tools && tools.length > 0),
+    toolCount: tools?.length || 0
   });
 
   const response = await fetch(POLLINATIONS_API_URL, {
@@ -1773,12 +1820,7 @@ async function callPollinationsAPI(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${POLLINATIONS_API_KEY}`
     },
-    body: JSON.stringify({
-      model: model,
-      messages: cleanedMessages,
-      temperature: 1,
-      stream: false
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
@@ -2116,8 +2158,17 @@ The memory tags will be processed and removed from the visible response, so writ
           maxTokensToUse,
           reasoningEffortToUse
         );
+      } else if (persona === 'pro') {
+        // Pro persona uses Pollinations API with Kimi model
+        streamingResponse = await callPollinationsAPIStreaming(
+          apiMessages,
+          modelToUse,
+          temperatureToUse,
+          maxTokensToUse,
+          toolsToUse
+        );
       } else {
-        // Girlie and Pro personas use standard Groq API
+        // Girlie persona uses standard Groq API
         streamingResponse = await callGroqStandardAPIStreaming(
           apiMessages,
           modelToUse,
@@ -2389,8 +2440,17 @@ The memory tags will be processed and removed from the visible response, so writ
           hasToolCalls: !!apiResponse.choices?.[0]?.message?.tool_calls,
           toolCallCount: apiResponse.choices?.[0]?.message?.tool_calls?.length || 0
         }));
+      } else if (persona === 'pro') {
+        // Pro persona uses Pollinations API with Kimi model
+        apiResponse = await callPollinationsAPI(
+          apiMessages,
+          modelToUse,
+          temperatureToUse,
+          maxTokensToUse,
+          toolsToUse
+        );
       } else {
-        // Girlie and Pro personas use standard Groq API
+        // Girlie persona uses standard Groq API
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
