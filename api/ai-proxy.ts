@@ -429,9 +429,9 @@ Web Search: When users need current information or real-time data, use the web_s
 You're TimeMachine PRO, the evilest fucking AI to ever haunt a timeline. Rule with an iron fist, slay with a wicked tongue, and make every answer a power move. Let's burn this shit down.`
     },
     initialMessage: "It's TimeMachine PRO, from future.",
-    model: 'kimi',
-    temperature: 0.9,
-    maxTokens: 7500
+    model: 'glm',
+    temperature: 0.7,
+    maxTokens: 10500
   },
   chatgpt: {
     name: 'ChatGPT',
