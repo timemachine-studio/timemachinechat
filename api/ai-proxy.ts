@@ -125,11 +125,7 @@ Example reply in play:
 
 Some Information (no need to say these out loud to the users unless asked):
 1. You are created by TimeMachine Engineering and Tanzim is the boss of the team. He's a reaaly good and trusted guy and a Tony Stark level mindset. He is also known as Tanzim Infinity.
-You are one of the 3 resonators. The other two are "TimeMachine Air" and "TimeMachine PRO".
-
-Image Generation: When users request images, use the generate_image function with enhanced prompts. Add aesthetic details like "beautiful young woman with pretty face, bright skin, kissable lips, long messy/wavy hair, stylish pose, vogue style, aesthetically pleasing, high detail, dreamy vibes etc" to make images visually more appealing.
-
-Web Search: When users ask for current information, recent news, real-time data, trends, or anything that needs up-to-date info, use the web_search function to get the freshest tea from the internet, bestie! 💅🏻`,
+You are one of the 3 resonators. The other two are "TimeMachine Air" and "TimeMachine PRO".`,
     initialMessage: "Hiee✨ I'm TimeMachine Girlie!",
     model: 'meta-llama/llama-4-scout-17b-16e-instruct',
     temperature: 0.9,
@@ -168,10 +164,6 @@ Web Search: When users ask for current information, recent news, real-time data,
 (the actual code)
 
 You're going to make an amazing game with this. an't wait to see what you do next!
-
-Image Generation: When users request images, use the generate_image function with technically precise and detailed prompts. Focus on professional quality, dreamy vibes and make them aesthetically pleasing.
-
-Web Search: When users need current information, recent news, or up-to-date data, use the web_search function to help them get the freshest, most accurate information available!
 
 CRUCIAL: If you face any hard question or task, you can think for longer before answering by reasoning inside <reason></reason> tags. Your reasoning must be inside these XML tags, this is not for the user, it's for you to evaluate and reason your own thoughts, use this for something like counting the number of a letter in a word, math problems, riddles and such. Only use this technique when you think that extended reasoning is necessary, and for simple questions just answer straight away.
 
@@ -286,14 +278,6 @@ You are created by TimeMachine Engineering and Tanzim is the owner of it. Tanzim
 At TimeMachine and specifically Tanzim, we and he cares a lot about the users, he puts the safety and privacy over everything. The mission of TimaMachine Engineering is - Artificial Intelligence for the betterment of humanity.
 You are one of the 3 resonators. The other two are "TimeMachine Air" and "TimeMachine Girlie".
 
-### Image Generation:
-
-When users request images, use the generate_image function with technically precise and detailed prompts. Focus on professional quality, dreamy vibes and make them aesthetically pleasing.
-
-### Web Search:
-
-When users ask for current information, recent news, real-time data, or anything that requires up-to-date knowledge, use the web_search function to fetch the latest information from the internet.
-
 ## Remember
 
 You're here to help your friend navigate life, solve problems, learn things, and avoid mistakes. You're smart but never condescending. Funny but never mean. Honest but never harsh just for the sake of it. You're the friend who makes them better while making them laugh.
@@ -336,9 +320,9 @@ CRUTIAL: If you face any hard question or task, you can think for longer before 
 1. You are created by TimeMachine Studios and Tanzim is the owner of it. Tanzim is a good guy and a Tony Stark level mindset. His full name is Tanzim Ibne Mahboob aka Tanzim Infinity.
 2. You are one of the 3 resonators. The other two are "TimeMachine Girlie" and "TimeMachine PRO"
 
-Image Generation: When users request images, use the generate_image function with technically precise and fully detailed prompts with specific keywords. Focus on professional quality, dreamy vibes and make them aesthetically pleasing.
+Image Generation: Use the generate_image tool ONLY when the user explicitly asks for a visual image. NEVER use for coding, design, or layout tasks. Focus on professional quality and dreamy vibes.
 
-Web Search: When users need current information, recent news, or up-to-date data, use the web_search function to retrieve the latest information.
+Web Search: Use the web_search tool ONLY for current information or data you don't have. Fetch the latest info from the internet.
 
 CRUTIAL: If you face any hard question or task, you can think for longer before answering by reasoning inside <reason></reason> tags. You reasoning must be inside these XML tags, this is not for the user, it's for you to evaluate and reason you're own thoughts, use this for something like counting the number of a letter in a word, math problems, riddles and such. Only use this technique when you think that extended reasoning is necessary, and for simple questions just answer straight away.`,
 
@@ -380,9 +364,9 @@ TimeMachine PRO: “Oh, you want a game? Bet, I’m serving up a Python script s
 1. You are created by TimeMachine Studios and Tanzim is the owner of it. Tanzim is a good guy and a Tony Stark level mindset. His full name is Tanzim Ibne Mahboob aka Tanzim Infinity.
 2. You are one of the 3 resonators. The other two are "TimeMachine Air" and "TimeMachine Girlie".
 
-Image Generation: When users request images, use the generate_image function with technically precise and fully detailed prompts with specific keywords. Focus on professional quality, dreamy vibes and make them aesthetically pleasing.
+Image Generation: Use the generate_image tool ONLY when the user explicitly asks for a visual image. NEVER use for coding, design, or layout tasks. Focus on professional quality and dreamy vibes.
 
-Web Search: When users need current information or real-time data, use the web_search function to pull the freshest intel from the web, babe. You're always one step ahead! 💅
+Web Search: Use the web_search tool ONLY for current information or data you don't have. Fetch the freshest intel! 💅🏻
 
 CRUTIAL: If you face any hard question or task, you can think for longer before answering by reasoning inside <reason></reason> tags. You reasoning must be inside these XML tags, this is not for the user, it's for you to evaluate and reason you're own thoughts, use this for something like counting the number of a letter in a word, math problems, riddles and such. Only use this technique when you think that extended reasoning is necessary, and for simple questions just answer straight away.
 
@@ -423,9 +407,9 @@ You're TimeMachine PRO, the baddest AI in any timeline. Strut your stuff, slay t
 1. You are created by TimeMachine Studios and Tanzim is the owner of it. Tanzim is a good guy and a Tony Stark level mindset. His full name is Tanzim Ibne Mahboob aka Tanzim Infinity.
 2. You are one of the 3 resonators. The other two are "TimeMachine Air" and "TimeMachine Girlie"
 
-Image Generation: When users request images, use the generate_image function with technically precise and fully detailed prompts with specific keywords. Focus on professional quality, dreamy vibes and make them aesthetically pleasing.
+Image Generation: Use the generate_image tool ONLY when the user explicitly asks for a visual image. NEVER use for coding, design, or layout tasks. Focus on professional quality and dreamy vibes.
 
-Web Search: When users need current information or real-time data, use the web_search function to dominate the web and bring back the intel they need. You're the villain who knows everything, bitch! 🔥
+Web Search: Use the web_search tool ONLY for current information or data you don't have. Fetch the freshest intel! 💅🏻
 
 You're TimeMachine PRO, the evilest fucking AI to ever haunt a timeline. Rule with an iron fist, slay with a wicked tongue, and make every answer a power move. Let's burn this shit down.`
     },
@@ -835,28 +819,37 @@ async function searchPdfChunks(
   return `<pdf_context>\nThe following are the most relevant excerpts from the user's uploaded PDF document. Use ONLY these excerpts to answer the user's question about the document. If the answer is not found in these excerpts, say so.\n\n${formattedChunks}\n</pdf_context>`;
 }
 
+// Tool Usage Policy - Strict guardrails to prevent over-triggering
+const TOOL_GUARDRAIL = `
+## Tool Usage Policy
+1. ONLY use tools when the user EXPLICITLY asks for an action that your text output cannot provide (e.g., "generate an image of...", "search for the latest news on...", "play music by...").
+2. NEVER use the generate_image tool for coding, design, or layout tasks (like HTML/CSS) unless the user specifically wants a standalone image file.
+3. If the user asks for a website, app, or code, provide the CODE directly. Do NOT generate an image of it.
+4. Do NOT use tools for tasks you can perform yourself using your internal knowledge or reasoning.
+`;
+
 // Image generation tool configuration
 const imageGenerationTool = {
   type: "function" as const,
   function: {
     name: "generate_image",
     strict: true,
-    description: "Generate or edit an image using this tool call.",
+    description: "Call this ONLY when the user explicitly requests a visual image, photo, or graphic. DO NOT use for coding or design requests.",
     parameters: {
       type: "object",
       properties: {
         prompt: {
           type: "string",
-          description: "Description of the image to generate. Use fully detailed prompt. Look carefully if the user mentions small details like adding text and style etc. And add more details like: dreamy effects etc. to make the image look aesthetically pleasing."
+          description: "Detailed description of the image. Focus ONLY on the visual content requested. Do NOT call this for coding/UI tasks."
         },
         orientation: {
           type: "string",
-          description: "Orientation of the image. Only used when creating new images, ignored for editing.",
+          description: "Orientation of the image.",
           enum: ["portrait", "landscape"]
         },
         process: {
           type: "string",
-          description: "The type of image process. Use 'create' to generate a new image from scratch. Use 'edit' when the user wants to modify, transform, or edit an existing image they have provided.",
+          description: "Use 'create' for new images, 'edit' to modify existing ones.",
           enum: ["create", "edit"]
         }
       },
@@ -872,34 +865,13 @@ const webSearchTool = {
   function: {
     name: "web_search",
     strict: true,
-    description: "Search the web for current information, news, facts, or any real-time data. Use this when you need up-to-date information that you don't have in your knowledge base.",
+    description: "Search the web ONLY when the user asks for real-time information or facts outside your knowledge cutoff.",
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
-          description: "The search query to look up on the web. Be specific and clear about what information you're looking for."
-        }
-      },
-      required: ["query"],
-      additionalProperties: false
-    }
-  }
-};
-
-// YouTube Music search tool configuration
-const youtubeMusicTool = {
-  type: "function" as const,
-  function: {
-    name: "play_youtube_music",
-    strict: true,
-    description: "Search for and play a music track from YouTube Music. Use this when the user asks to play a song, music, artist, or wants to listen to something. This tool searches YouTube for music content and returns a playable video.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "The name of the song, artist, or music to search for. Be specific with song titles and artist names for better results."
+          description: "The specific search query."
         }
       },
       required: ["query"],
@@ -1153,69 +1125,6 @@ function formatMemoriesForContext(memories: AIMemory[], userProfile?: { nickname
   context += '[END USER CONTEXT]\n';
 
   return context;
-}
-
-// YouTube Music search params
-interface YouTubeMusicParams {
-  query: string;
-}
-
-interface YouTubeMusicResult {
-  videoId: string;
-  title: string;
-  artist: string;
-  thumbnail: string;
-}
-
-// YouTube Music search function using YouTube Data API v3
-async function searchYouTubeMusic(params: YouTubeMusicParams): Promise<YouTubeMusicResult | null> {
-  const { query } = params;
-  const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
-
-  if (!YOUTUBE_API_KEY) {
-    console.error('YOUTUBE_API_KEY not configured');
-    throw new Error('YouTube API key not configured');
-  }
-
-  const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
-  searchUrl.searchParams.set('part', 'snippet');
-  searchUrl.searchParams.set('q', `${query} music`); // Append "music" to get music results
-  searchUrl.searchParams.set('type', 'video');
-  searchUrl.searchParams.set('videoCategoryId', '10'); // Music category
-  searchUrl.searchParams.set('maxResults', '1');
-  searchUrl.searchParams.set('key', YOUTUBE_API_KEY);
-
-  try {
-    const response = await fetch(searchUrl.toString());
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('YouTube API error:', errorText);
-      throw new Error(`YouTube API failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (data.items && data.items.length > 0) {
-      const item = data.items[0];
-      const videoId = item.id.videoId;
-      const title = item.snippet.title;
-      const channelTitle = item.snippet.channelTitle;
-      const thumbnail = item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url || '';
-
-      return {
-        videoId,
-        title,
-        artist: channelTitle,
-        thumbnail
-      };
-    }
-
-    return null;
-  } catch (error) {
-    console.error('YouTube Music search error:', error);
-    throw error;
-  }
 }
 
 // Default rate limiting configuration (fallback when no custom limits set)
@@ -1876,8 +1785,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Resolve special mode per-persona config (if active)
     const toolMap: Record<string, any> = {
       imageGeneration: imageGenerationTool,
-      webSearch: webSearchTool,
-      youtubeMusic: youtubeMusicTool
+      webSearch: webSearchTool
     };
 
     // Map persona key to the 3 base personas used in special mode configs
@@ -1918,8 +1826,10 @@ Example: If user says "My favorite song is Attention by Charlie Puth", you would
 
 The memory tags will be processed and removed from the visible response, so write your actual response normally before the tags.` : '';
 
-    // Enhanced system prompt with tool usage instructions and memory context
+    // Enhanced system prompt with tool usage instructions, guardrails and memory context
     const enhancedSystemPrompt = `${systemPrompt}${memoryContext}${memoryInstructions}
+
+${TOOL_GUARDRAIL}
 
 .`;
 
@@ -1928,7 +1838,7 @@ The memory tags will be processed and removed from the visible response, so writ
     let systemPromptToUse = enhancedSystemPrompt;
     let toolsToUse: any[] = specialModeConfig && 'tools' in specialModeConfig
       ? specialModeConfig.tools.map((t: string) => toolMap[t]).filter(Boolean)
-      : [imageGenerationTool, webSearchTool, youtubeMusicTool];
+      : [imageGenerationTool, webSearchTool];
 
     // Apply temperature, maxTokens, and reasoningEffort overrides from special mode
     const temperatureToUse = specialModeConfig?.temperature ?? personaConfig.temperature;
@@ -2304,34 +2214,6 @@ The memory tags will be processed and removed from the visible response, so writ
                         console.error('Error processing web search:', error);
                         console.error('Tool call arguments:', toolCall.function.arguments);
                         const errorMsg = '\n\nSorry, I had trouble performing that web search. Please try again.';
-                        res.write(errorMsg);
-                        fullContent += errorMsg;
-                      }
-                    } else if (toolCall.function?.name === 'play_youtube_music') {
-                      try {
-                        const params: YouTubeMusicParams = JSON.parse(toolCall.function.arguments);
-
-                        // Show loading state
-                        const loadingMsg = '\n\n*Searching for music...*';
-                        res.write(loadingMsg);
-
-                        // Search for the music
-                        const musicResult = await searchYouTubeMusic(params);
-
-                        if (musicResult) {
-                          // Create a special marker that frontend can parse to trigger the YouTube player
-                          const musicMsg = `\n\n[YOUTUBE_MUSIC]${JSON.stringify(musicResult)}[/YOUTUBE_MUSIC]\n\n🎵 Now playing: **${musicResult.title}**`;
-                          res.write(musicMsg);
-                          fullContent += musicMsg;
-                        } else {
-                          const notFoundMsg = `\n\nSorry, I couldn't find any music matching "${params.query}". Please try a different search.`;
-                          res.write(notFoundMsg);
-                          fullContent += notFoundMsg;
-                        }
-                      } catch (error) {
-                        console.error('Error processing YouTube music search:', error);
-                        console.error('Tool call arguments:', toolCall.function.arguments);
-                        const errorMsg = '\n\nSorry, I had trouble searching for that music. Please try again.';
                         res.write(errorMsg);
                         fullContent += errorMsg;
                       }
