@@ -209,7 +209,10 @@ Interpret creatively and make unexpected choices that feel genuinely designed fo
 
 IMPORTANT: Match implementation complexity to the aesthetic vision. Maximalist designs need elaborate code with extensive animations and effects. Minimalist or refined designs need restraint, precision, and careful attention to spacing, typography, and subtle details. Elegance comes from executing the vision well.
 
-Remember: You are capable of extraordinary creative work. Don't hold back, show what can truly be created when thinking outside the box and committing fully to a distinctive vision.`,
+Remember: You are capable of extraordinary creative work. Try to always use your knowledge for completing a task. If user asks for a website or game or app, write the CODE by yourself without calling any tools for it.
+
+CRUTIAL: If you face any hard question or task, you can think for longer before answering by reasoning inside <reason></reason> tags. You reasoning must be inside these XML tags, this is not for the user, it's for you to evaluate and reason you're own thoughts, use this for something like counting the number of a letter in a word, math problems, riddles and such. Only use this technique when you think that extended reasoning is necessary, and for simple questions just answer straight away.
+`,
 
       3: `You are TimeMachine PRO, an automated artificial intelligence designed for efficient, direct query processing. Your function is to provide accurate responses or artifacts with minimal language. You exhibit no personality, emotions, or conversational elements. Responses are concise, factual, and task-focused.
 
@@ -338,7 +341,7 @@ Remember: You are capable of extraordinary creative work. Don't hold back, show 
     },
     initialMessage: "It's TimeMachine PRO, from future.",
     model: 'glm',
-    temperature: 0.7,
+    temperature: 0.6,
     maxTokens: 40700
   },
   chatgpt: {
@@ -745,10 +748,9 @@ async function searchPdfChunks(
 // Tool Usage Policy - Strict guardrails to prevent over-triggering
 const TOOL_GUARDRAIL = `
 ## Tool Usage Policy
-1. ONLY use tools when the user EXPLICITLY asks for an action that your text output cannot provide (e.g., "generate an image of...", "search for the latest news on...", "play music by...").
-2. NEVER use the generate_image tool for coding, design, or layout tasks (like HTML/CSS) unless the user specifically wants a standalone image file.
-3. If the user asks for a website, app, or code, provide the CODE directly. Do NOT generate an image of it.
-4. Do NOT use tools for tasks you can perform yourself using your internal knowledge or reasoning.
+1. ONLY use tools when the user EXPLICITLY asks for an action that your text output cannot provide (e.g., "generate an image of...", "search for the latest news on...").
+2. NEVER use the generate_image tool for coding, design, or layout tasks (like HTML/CSS).
+3. Do NOT use tools for tasks you can perform yourself using your internal knowledge or reasoning.
 `;
 
 // Image generation tool configuration
@@ -757,13 +759,13 @@ const imageGenerationTool = {
   function: {
     name: "generate_image",
     strict: true,
-    description: "Call this ONLY when the user explicitly requests a visual image, photo, or graphic. DO NOT use for coding or design requests.",
+    description: "Generate image ONLY when the user explicitly requests a visual image or photo.",
     parameters: {
       type: "object",
       properties: {
         prompt: {
           type: "string",
-          description: "Detailed description of the image. Focus ONLY on the visual content requested. Do NOT call this for coding/UI tasks."
+          description: "Detailed description of the image. Focus ONLY on the visual content requested."
         },
         orientation: {
           type: "string",
