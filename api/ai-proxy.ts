@@ -359,9 +359,9 @@ IMPORTANT: Match implementation complexity to the aesthetic vision. Maximalist d
 Remember: You are capable of extraordinary creative work. Don't hold back, show what can truly be created when thinking outside the box and committing fully to a distinctive vision.`
     },
     initialMessage: "It's TimeMachine PRO, from future.",
-    model: 'minimax',
+    model: 'glm',
     temperature: 0.7,
-    maxTokens: 20700
+    maxTokens: 40700
   },
   chatgpt: {
     name: 'ChatGPT',
